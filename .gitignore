@@ -1,0 +1,7 @@
+/bin
+/obj
+/.vs
+/Properties
+/LocalBackgroundImageViewer.csproj.user
+/.vscode/launch.json
+/.vscode/tasks.json
