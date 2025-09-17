@@ -32,6 +32,16 @@ namespace LocalWallpaperViewer
         enum OrientationFilterStates { All, Portrait, Landscape }
         enum ResolutionFilterStates { All, HD, FullHD, UltraHD }
 
+        [Flags]
+        enum FolderVisibility // bitmask shenanigans
+        {
+            None    = 0,
+            SourceA = 1 << 0, // 0001
+            SourceB = 1 << 1, // 0010
+            SourceC = 1 << 2, // 0100
+            All     = SourceA | SourceB | SourceC // 0111
+        }
+
         public class ThumbnailMetadata
         {
             public string? Folder { get; set; }
@@ -46,7 +56,16 @@ namespace LocalWallpaperViewer
             ViewMode = Settings.Default.ViewMode;
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
+            
+            MessageBox.Show(Convert.ToString(Settings.Default.FolderVisibilityMask, 2).ToString(), "Bitmask");
             this.assets = GetAssets();
+
+            var visibility = (FolderVisibility)Settings.Default.FolderVisibilityMask;
+
+            folderVisibilityStates[assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
+            folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
+            folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
+
             SetupUI();
         }
 
@@ -455,6 +474,15 @@ namespace LocalWallpaperViewer
 
         private void SaveSettings()
         {
+            // Convert dictionary to bitmask
+            FolderVisibility visibility = 0;
+            if (folderVisibilityStates.TryGetValue(assetsUserDirectory, out var a) && a) visibility |= FolderVisibility.SourceA;
+            if (folderVisibilityStates.TryGetValue(assetsLockScreenDirectory, out var b) && b) visibility |= FolderVisibility.SourceB;
+            if (folderVisibilityStates.TryGetValue(assetsSpotLightDirectory, out var c) && c) visibility |= FolderVisibility.SourceC;
+            
+            Settings.Default.FolderVisibilityMask = (int)visibility;
+            Console.WriteLine(visibility);
+
             Settings.Default.ViewMode = ViewMode;
             Settings.Default.OrientationFilter = (int)OrientationFilter;
             Settings.Default.ResolutionFilter = (int)ResolutionFilter;
@@ -610,6 +638,10 @@ namespace LocalWallpaperViewer
             };
             SettingsMenuItemFolder3.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
+            SettingsMenuItemFolder1.Checked = folderVisibilityStates[assetsUserDirectory];
+            SettingsMenuItemFolder2.Checked = folderVisibilityStates[assetsLockScreenDirectory];
+            SettingsMenuItemFolder3.Checked = folderVisibilityStates[assetsSpotLightDirectory];
+
             // About menu item
             var SettingsMenuItemAbout = new ToolStripMenuItem("About")
             {
@@ -618,10 +650,6 @@ namespace LocalWallpaperViewer
                 Image = GetIconFromFont('\uE946') // Info icon
             };
             SettingsMenuItemAbout.Click += OnSettingsMenuItemAboutClick;
-
-            folderVisibilityStates[assetsUserDirectory] = true;
-            folderVisibilityStates[assetsLockScreenDirectory] = true;
-            folderVisibilityStates[assetsSpotLightDirectory] = true;
 
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder1);
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder2);

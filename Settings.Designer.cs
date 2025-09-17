@@ -59,5 +59,17 @@ namespace LocalWallpaperViewer {
             }
         }
 
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int FolderVisibilityMask {
+            get {
+                return ((int)(this["FolderVisibilityMask"]));
+            }
+            set {
+                this["FolderVisibilityMask"] = value;
+            }
+        }
+
     }
 }
