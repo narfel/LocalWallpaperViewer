@@ -3,6 +3,46 @@ using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 
+public static class StatusLabelExtensions
+{
+    private const string DefaultMessage = "Double click an image from the list to view";
+    private static System.Windows.Forms.Timer? notificationTimer;
+
+    public static void ShowTemporaryNotification(
+        this ToolStripStatusLabel label,
+        string notificationText,
+        double displayDurationSeconds = 3.0)
+    {
+        if (notificationTimer != null)
+        {
+            notificationTimer.Stop();
+            notificationTimer.Dispose();
+            notificationTimer = null;
+        }
+
+        label.Text = notificationText;
+
+        notificationTimer = new System.Windows.Forms.Timer
+        {
+            Interval = (int)(displayDurationSeconds * 1000)
+        };
+
+        notificationTimer.Tick += (sender, e) =>
+        {
+            if (notificationTimer != null)
+            {
+                notificationTimer.Stop();
+                notificationTimer.Dispose();
+                notificationTimer = null;
+            }
+
+            label.Text = DefaultMessage;
+        };
+
+        notificationTimer.Start();
+    }
+}
+
 namespace LocalWallpaperViewer
 {
     public partial class Form1 : Form
@@ -14,12 +54,12 @@ namespace LocalWallpaperViewer
         private ToolStripButton? _toggleViewButton;
         private FlowLayoutPanel? _thumbnailPanel;
         private TreeView? _fileTreeView;
+        private ToolStripStatusLabel statusStripLabel = new ToolStripStatusLabel("Double click an image from the list to view");
         private ToolStripDropDownButton? _statusStripThumbnailFilterButton;
         private ToolStripDropDownButton? _statusStripResolutionFilterButton;
         private PictureBox? selectedThumbnail = null;
         private ToolStripStatusLabel? _statusStripFilterLabel;
         private ContextMenuStrip? _fileContextMenuStrip;
-        private Panel? _detailsPanel;
         private TreeNode? generalNode;
         private TreeNode? lockscreenNode;
         private TreeNode? spotLightNode;
@@ -68,7 +108,6 @@ namespace LocalWallpaperViewer
             folderVisibilityStates[assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
             folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
             folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
-
             SetupUI();
         }
 
@@ -286,7 +325,6 @@ namespace LocalWallpaperViewer
             int screenH = Screen.PrimaryScreen?.Bounds.Height ?? 768;
             double scale = 0.7; // use 70% of screen size
 
-            // expected sizes: 3840x2160, 1920x1080 (landscape) or 1080x1920 (portrait)
             // calculate scaled form size based on image aspect
             double ratioW = (screenW * scale) / img.Width;
             double ratioH = (screenH * scale) / img.Height;
@@ -442,9 +480,30 @@ namespace LocalWallpaperViewer
             }
         }
 
+        private void OnSettingsMenuItemSetQuickSaveClick(object? sender, EventArgs e)
+        {
+            using var folderDialog = new FolderBrowserDialog
+            {
+                Description = "Select Quick Save Folder",
+                SelectedPath = string.IsNullOrEmpty(Settings.Default.QuickSavePath) 
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+                    : Settings.Default.QuickSavePath,
+                ShowNewFolderButton = true
+            };
+
+            if (folderDialog.ShowDialog() == DialogResult.OK)
+            {
+                Settings.Default.QuickSavePath = folderDialog.SelectedPath;
+                Settings.Default.Save();
+
+                MessageBox.Show($"Quick save folder set to:\n{folderDialog.SelectedPath}",
+                                "Settings Updated", MessageBoxButtons.OK, MessageBoxIcon.None);
+            }
+        }
+
         private void OnSettingsMenuItemAboutClick(object? sender, EventArgs e)
         {
-            MessageBox.Show("Version 0.01 alpha", "About", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Version 0.01 alpha", "About", MessageBoxButtons.OK, MessageBoxIcon.None);
         }
 
         private void OnFolderMenuItemCheckedChanged(object? sender, EventArgs e)
@@ -460,7 +519,7 @@ namespace LocalWallpaperViewer
             ApplyFilter();
         }
 
-        private void OnSaveButtonClick(object? sender, EventArgs e)
+        private void OnSaveButtonMenuItemClick(object? sender, EventArgs e)
         {
             FileInfo? selectedFile = null;
 
@@ -492,6 +551,55 @@ namespace LocalWallpaperViewer
             }
             else
             {
+                MessageBox.Show("Click on an image to select it and save it",
+                                "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void OnQuickSaveMenuItemClick(object? sender, EventArgs e)
+        {
+            FileInfo? selectedFile = null;
+
+            if (_fileTreeView?.Visible == true && _fileTreeView.SelectedNode?.Tag is FileInfo selectedFileFromTree)
+            {
+                selectedFile = selectedFileFromTree;
+            }
+            else if (_thumbnailPanel?.Visible == true &&
+                    selectedThumbnail != null &&
+                    this.pictureMap.TryGetValue(selectedThumbnail, out var fileFromThumbnail))
+            {
+                selectedFile = fileFromThumbnail;
+            }
+
+            if (selectedFile != null && File.Exists(selectedFile.FullName))
+            {
+                // check if FolderPath is configured
+                if (string.IsNullOrEmpty(Settings.Default.QuickSavePath))
+                {
+                    MessageBox.Show("Please set a quick save folder first using Settings > Set Quick Save Folder",
+                                    "No Folder Configured", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string fileName = $"{Path.GetFileNameWithoutExtension(selectedFile.Name)}.jpg";
+                string savePath = Path.Combine(Settings.Default.QuickSavePath, fileName);
+
+                // check for file name conflicts
+                int counter = 1;
+                while (File.Exists(savePath))
+                {
+                    fileName = $"{Path.GetFileNameWithoutExtension(selectedFile.Name)}_{counter}.jpg";
+                    savePath = Path.Combine(Settings.Default.QuickSavePath, fileName);
+                    counter++;
+                }
+
+                using var img = Image.FromFile(selectedFile.FullName);
+                img.Save(savePath, ImageFormat.Jpeg);
+
+                this.statusStripLabel.ShowTemporaryNotification($"Image saved to: {savePath}");
+            }
+            else
+            {
                 MessageBox.Show("Click on an image to select it and save it.",
                                 "Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -507,7 +615,6 @@ namespace LocalWallpaperViewer
                 _toggleViewButton == null ||
                 _statusStripFilterLabel == null ||
                 _statusStripThumbnailFilterButton == null ||
-                _detailsPanel == null ||
                 _statusStripResolutionFilterButton == null)
             {
                 return; // nothing to update
@@ -520,8 +627,6 @@ namespace LocalWallpaperViewer
 
             _thumbnailPanel.Visible = ViewMode;
             _fileTreeView.Visible = !ViewMode;
-            _detailsPanel.Visible = !ViewMode;
-            if (_detailsPanel.Visible == true) _detailsPanel.BringToFront();
             _toggleViewButton.Text = ViewMode ? "Show file list" : "Show thumbnails";
             _toggleViewButton.Image = ViewMode ? GetIconFromFont('\uE9a4') : GetIconFromFont('\uE91b');
             _statusStripFilterLabel.Visible = ViewMode;
@@ -585,7 +690,8 @@ namespace LocalWallpaperViewer
         {
             _fileContextMenuStrip = new ContextMenuStrip();
             _fileContextMenuStrip.Items.Add("Show image", GetIconFromFont('\uE91b'), OnShowImageMenuItemClick);
-            _fileContextMenuStrip.Items.Add("Save image", GetIconFromFont('\uE74e'), OnSaveButtonClick);
+            _fileContextMenuStrip.Items.Add("Quick save", GetIconFromFont('\uE91b'), OnQuickSaveMenuItemClick);
+            _fileContextMenuStrip.Items.Add("Save to...", GetIconFromFont('\uE74e'), OnSaveButtonMenuItemClick);
             _fileContextMenuStrip.Items.Add(new ToolStripSeparator());
             _fileContextMenuStrip.Items.Add("Open image folder", GetIconFromFont('\uE838'), OnOpenFolderMenuItemClick);
         }
@@ -596,32 +702,30 @@ namespace LocalWallpaperViewer
             int padding = (int)(fontSize * 0.6); // padding to prevent clipping 
             int bitmapSize = fontSize + padding;
 
-            Bitmap bitmap = new Bitmap(bitmapSize, bitmapSize);
-            using (Graphics graphics = Graphics.FromImage(bitmap))
+            Bitmap bitmap = new(bitmapSize, bitmapSize);
+            using Graphics graphics = Graphics.FromImage(bitmap);
+            // set up drawing properties for quality
+            graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+            // use a StringFormat to center the glyph and allow for full rendering
+            StringFormat format = new StringFormat
             {
-                // set up drawing properties for quality
-                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoClip | StringFormatFlags.NoWrap
+            };
 
-                // use a StringFormat to center the glyph and allow for full rendering
-                StringFormat format = new StringFormat
-                {
-                    Alignment = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center,
-                    FormatFlags = StringFormatFlags.NoClip | StringFormatFlags.NoWrap
-                };
+            // create the font and brush
+            Font font = new("Segoe Fluent Icons", fontSize);
+            SolidBrush brush = new(Color.Black);
 
-                // create the font and brush
-                Font font = new("Segoe Fluent Icons", fontSize);
-                SolidBrush brush = new(Color.Black);
+            // define a rectangle for the drawing, including padding
+            RectangleF rect = new(0, 0, bitmapSize, bitmapSize);
 
-                // define a rectangle for the drawing, including padding
-                RectangleF rect = new(0, 0, bitmapSize, bitmapSize);
+            // draw the character onto the bitmap within the defined rectangle
+            graphics.DrawString(iconChar.ToString(), font, brush, rect, format);
 
-                // draw the character onto the bitmap within the defined rectangle
-                graphics.DrawString(iconChar.ToString(), font, brush, rect, format);
-
-                return bitmap;
-            }
+            return bitmap;
         }
 
         private void SetupUI()
@@ -691,6 +795,15 @@ namespace LocalWallpaperViewer
             };
             SettingsMenuItemFolder3.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
+            // show Set Quick Save Folder menu item
+            var SettingsMenuItemSetQuickSave = new ToolStripMenuItem("Set Quick Save folder")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ued43') // Folder icon
+            };
+            SettingsMenuItemSetQuickSave.Click += OnSettingsMenuItemSetQuickSaveClick;
+
             SettingsMenuItemFolder1.Checked = folderVisibilityStates[assetsUserDirectory];
             SettingsMenuItemFolder2.Checked = folderVisibilityStates[assetsLockScreenDirectory];
             SettingsMenuItemFolder3.Checked = folderVisibilityStates[assetsSpotLightDirectory];
@@ -707,6 +820,8 @@ namespace LocalWallpaperViewer
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder1);
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder2);
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder3);
+            settingsButton.DropDownItems.Add(new ToolStripSeparator());
+            settingsButton.DropDownItems.Add(SettingsMenuItemSetQuickSave);
             settingsButton.DropDownItems.Add(new ToolStripSeparator());
             settingsButton.DropDownItems.Add(SettingsMenuItemAbout);
 
@@ -756,7 +871,7 @@ namespace LocalWallpaperViewer
             _toolStrip.Items.Add(_toggleViewButton);
             _toolStrip.Items.Add(settingsButton);
 
-            saveButton.Click += OnSaveButtonClick;
+            saveButton.Click += OnSaveButtonMenuItemClick;
 
             _toggleViewButton.Click += (s, e) =>
             {
@@ -774,43 +889,10 @@ namespace LocalWallpaperViewer
             // file tree view
             _fileTreeView = new()
             {
-                Dock = DockStyle.Left,
-                Width = 300, // fixed width instead of Fill
-                BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.DarkGray,
-                AutoSize = true
-            };
-
-            // details panel fills the rest
-            _detailsPanel = new Panel
-            {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.DarkGray,
-            };
-            this.Controls.Add(_detailsPanel);
-
-            // add a label for file info
-            var detailsLabel = new Label
-            {
-                Dock = DockStyle.Top,
-                BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.DarkGray,
                 AutoSize = true
-            };
-            _detailsPanel.Controls.Add(detailsLabel);
-
-            // update label on selection
-            _fileTreeView.AfterSelect += (s, e) =>
-            {
-                if (e.Node != null && e.Node.Tag is FileInfo fileinfo)
-                {
-                    detailsLabel.Text = $"Name: {fileinfo.Name}\nSize: {fileinfo.Length / 1024} KB\nModified: {fileinfo.LastWriteTime}";
-                }
-                else
-                {
-                    detailsLabel.Text = "Select a file to view details";
-                }
             };
 
             generalNode = new("Assets folder");
@@ -875,7 +957,7 @@ namespace LocalWallpaperViewer
                         Height = 60,
                         Width = 100,
                         SizeMode = PictureBoxSizeMode.Zoom,
-                        Cursor = Cursors.Hand
+                        Cursor = Cursors.Hand,
                     };
 
                     picBox.DoubleClick += OnPictureBoxDoubleClick;
@@ -917,7 +999,7 @@ namespace LocalWallpaperViewer
                             Folder = fileInfo.DirectoryName,
                             Width = tempImage.Width,
                             Height = tempImage.Height,
-                            File = fileInfo
+                            File = fileInfo,
                         }
                     };
                     container.Controls.Add(picBox);
@@ -934,7 +1016,6 @@ namespace LocalWallpaperViewer
 
             // status strip
             var statusStrip = new StatusStrip { ShowItemToolTips = true };
-            var statusStripLabel = new ToolStripStatusLabel("Double click an image from the list to view");
             statusStrip.Items.Add(statusStripLabel);
             statusStrip.Items.Add(new ToolStripStatusLabel("") { Spring = true, TextAlign = ContentAlignment.MiddleRight });
 
