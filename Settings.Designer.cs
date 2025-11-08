@@ -25,7 +25,7 @@ namespace LocalWallpaperViewer {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
         public bool ViewMode {
             get {
                 return ((bool)(this["ViewMode"]));
@@ -37,7 +37,7 @@ namespace LocalWallpaperViewer {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        [global::System.Configuration.DefaultSettingValueAttribute("2")]
         public int OrientationFilter {
             get {
                 return ((int)(this["OrientationFilter"]));
@@ -49,7 +49,7 @@ namespace LocalWallpaperViewer {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        [global::System.Configuration.DefaultSettingValueAttribute("4")]
         public int ResolutionFilter {
             get {
                 return ((int)(this["ResolutionFilter"]));

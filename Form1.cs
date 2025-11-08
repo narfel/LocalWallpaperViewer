@@ -26,7 +26,6 @@ public static class StatusLabelExtensions
         {
             Interval = (int)(displayDurationSeconds * 1000)
         };
-
         notificationTimer.Tick += (sender, e) =>
         {
             if (notificationTimer != null)
@@ -47,7 +46,8 @@ namespace LocalWallpaperViewer
 {
     public partial class Form1 : Form
     {
-        private FileInfo[] assets = Array.Empty<FileInfo>();
+        private FileInfo[] _allAssetsCache;
+        private int _absoluteTotalCount;
         private Dictionary<PictureBox, FileInfo> pictureMap = [];
 
         private ToolStrip? _toolStrip;
@@ -63,23 +63,27 @@ namespace LocalWallpaperViewer
         private TreeNode? generalNode;
         private TreeNode? lockscreenNode;
         private TreeNode? spotLightNode;
+        private Label? no_results_label;
+        private ToolStripLabel? FilesToolStripLabel;
 
         private string assetsUserDirectory = string.Empty;
         private string assetsLockScreenDirectory = string.Empty;
         private string assetsSpotLightDirectory = string.Empty;
         private bool ViewMode;
+        private int visibleItemCount = 0;
         private bool LandscapeFilterActive = false;
         private OrientationFilterStates OrientationFilter;
         private ResolutionFilterStates ResolutionFilter;
         private Dictionary<string, bool> folderVisibilityStates = [];
 
         enum OrientationFilterStates { All, Portrait, Landscape }
-        enum ResolutionFilterStates { All, HD, FullHD, UltraHD }
+        enum ResolutionFilterStates { All, HD, FullHD, vFullHD, UltraHD }
 
         [Flags]
         enum FolderVisibility
         {
-            None = 0,
+            NotInitialized = 0, // never configured
+            None = 1 << 3, // 1000 user chose no folders
             SourceA = 1 << 0, // 0001
             SourceB = 1 << 1, // 0010
             SourceC = 1 << 2, // 0100
@@ -101,13 +105,24 @@ namespace LocalWallpaperViewer
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
 
-            this.assets = GetAssets();
+            GetAssets();
 
             var visibility = (FolderVisibility)Settings.Default.FolderVisibilityMask;
 
-            folderVisibilityStates[assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
-            folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
-            folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
+            if (visibility == FolderVisibility.NotInitialized)
+            {
+                // first run
+                folderVisibilityStates[assetsUserDirectory] = Directory.Exists(assetsUserDirectory);
+                folderVisibilityStates[assetsLockScreenDirectory] = Directory.Exists(assetsLockScreenDirectory);
+                folderVisibilityStates[assetsSpotLightDirectory] = Directory.Exists(assetsSpotLightDirectory);
+            }
+            else
+            {
+                // or use saved settings
+                folderVisibilityStates[assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
+                folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
+                folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
+            }
             SetupUI();
         }
 
@@ -125,7 +140,9 @@ namespace LocalWallpaperViewer
                 this.assetsLockScreenDirectory,
                 this.assetsSpotLightDirectory
             };
-            return GetAssetsFromDirectories(directories);
+            _allAssetsCache = GetAssetsFromDirectories(directories);
+            _absoluteTotalCount = _allAssetsCache.Length;
+            return _allAssetsCache;
         }
 
         private static FileInfo[] GetAssetsFromDirectories(IEnumerable<string> directories)
@@ -133,12 +150,7 @@ namespace LocalWallpaperViewer
             var results = new List<FileInfo>();
             foreach (var directory in directories)
             {
-                if (!Directory.Exists(directory))
-                {
-                    MessageBox.Show($"Directory '{directory}' does not exist!", "Warning",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    continue;
-                }
+                if (!Directory.Exists(directory)) continue;
                 var files = new DirectoryInfo(directory)
                     .GetFiles("*.*", SearchOption.AllDirectories);
                 foreach (var file in files)
@@ -214,48 +226,31 @@ namespace LocalWallpaperViewer
         {
             if (_thumbnailPanel == null)
             {
-                UpdateFilterButtonText();
+                UpdateFilterButton();
                 return;
             }
 
             UpdateTreeViewNodes();
 
+            visibleItemCount = 0;
+            
+            int effectiveTotalCount = 0;
+
             foreach (var container in _thumbnailPanel.Controls.OfType<Panel>())
             {
                 var picBox = container.Controls.OfType<PictureBox>().FirstOrDefault();
+                bool visible = false;
+
                 if (picBox == null)
                 {
-                    container.Visible = OrientationFilter == 0; // hide if missing
-                    continue;
+                    visible = OrientationFilter == 0; // hide if missing
                 }
-
-                if (container.Tag is ThumbnailMetadata meta)
+                else if (container.Tag is ThumbnailMetadata meta)
                 {
-                    bool visible = true;
-
-                    // orientation filter
-                    if (OrientationFilter == OrientationFilterStates.Portrait)
-                    {
-                        visible &= meta.Height > meta.Width;
-                        ResolutionFilter = ResolutionFilterStates.All;
-                    }
-                    else if (OrientationFilter == OrientationFilterStates.Landscape)
-                    {
-                        visible &= meta.Width > meta.Height;
-                    }
-                    else if (OrientationFilter == OrientationFilterStates.All)
-                    {
-                        ResolutionFilter = ResolutionFilterStates.All;
-                    }
-
-                    // resolution filter
-                    if (ResolutionFilter == ResolutionFilterStates.FullHD)
-                        visible &= meta.Width == 1920 && meta.Height == 1080;
-                    else if (ResolutionFilter == ResolutionFilterStates.UltraHD)
-                        visible &= meta.Width == 3840 && meta.Height == 2160;
+                    visible = true;
 
                     // folder filter:
-                    if (meta.Folder != null)
+                    if (visible && meta.Folder != null)
                     {
                         foreach (var record in folderVisibilityStates)
                         {
@@ -267,16 +262,58 @@ namespace LocalWallpaperViewer
                         }
                     }
 
-                    container.Visible = visible;
+                    if (visible) 
+                    {
+                        effectiveTotalCount++;
+                    }
+
+                    // orientation filter
+                    if (OrientationFilter == OrientationFilterStates.Portrait)
+                    {
+                        visible &= meta.Height > meta.Width;
+                    }
+                    else if (OrientationFilter == OrientationFilterStates.Landscape)
+                    {
+                        visible &= meta.Width > meta.Height;
+                    }
+
+                    // resolution filter
+                    if (visible)
+                    {
+                        if (ResolutionFilter == ResolutionFilterStates.FullHD)
+                            visible &= meta.Width == 1920 && meta.Height == 1080;
+                        else if (ResolutionFilter == ResolutionFilterStates.vFullHD)
+                            visible &= meta.Width == 1080 && meta.Height == 1920;
+                        else if (ResolutionFilter == ResolutionFilterStates.UltraHD)
+                            visible &= meta.Width == 3840 && meta.Height == 2160;
+                    }
+
                 }
-                LandscapeFilterActive = OrientationFilter == OrientationFilterStates.Landscape;
+
+                container.Visible = visible;
+
+                if (visible)
+                {
+                    visibleItemCount++;
+                }
+            }
+            
+            LandscapeFilterActive = OrientationFilter == OrientationFilterStates.Landscape;
+
+            if (no_results_label != null)
+            {
+                no_results_label.Visible = visibleItemCount == 0; 
             }
 
-            UpdateFilterButtonText();
+            if (FilesToolStripLabel != null)
+            {
+                FilesToolStripLabel.Text = $"Showing {visibleItemCount} of {effectiveTotalCount} files";
+            }
+            UpdateFilterButton();
             UpdateViewState();
         }
 
-        private void UpdateFilterButtonText()
+        private void UpdateFilterButton()
         {
             if (_statusStripThumbnailFilterButton != null)
             {
@@ -284,15 +321,15 @@ namespace LocalWallpaperViewer
                 {
                     case OrientationFilterStates.All:
                         _statusStripThumbnailFilterButton.Text = "All";
-                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\uE8a9'); // All images icon
+                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\ue8cc'); // All images icon
                         break;
                     case OrientationFilterStates.Portrait:
                         _statusStripThumbnailFilterButton.Text = "Portrait";
-                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\uF573'); // Portrait icon
+                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\uee64'); // Portrait icon
                         break;
                     case OrientationFilterStates.Landscape:
                         _statusStripThumbnailFilterButton.Text = "Landscape";
-                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\uF577'); // Landscape icon
+                        _statusStripThumbnailFilterButton.Image = GetIconFromFont('\ue70a'); // Landscape icon
                         break;
                 }
             }
@@ -302,15 +339,19 @@ namespace LocalWallpaperViewer
                 {
                     case ResolutionFilterStates.All:
                         _statusStripResolutionFilterButton.Text = "All Resolutions";
-                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\ue740'); // Resolution Arrows
+                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\ue8cc'); // Resolution Arrows
                         break;
                     case ResolutionFilterStates.FullHD:
                         _statusStripResolutionFilterButton.Text = "1920x1080";
-                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\uF573'); // Portrait icon
+                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\ue70a'); // Landscape icon
+                        break;
+                    case ResolutionFilterStates.vFullHD:
+                        _statusStripResolutionFilterButton.Text = "1080x1920";
+                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\uee64'); // Portrait Icon //F573
                         break;
                     case ResolutionFilterStates.UltraHD:
                         _statusStripResolutionFilterButton.Text = "3840x2160";
-                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\uF577'); // Landscape icon
+                        _statusStripResolutionFilterButton.Image = GetIconFromFont('\ue70a'); // Landscape icon
                         break;
                 }
             }
@@ -510,9 +551,18 @@ namespace LocalWallpaperViewer
         {
             var menuItem = (ToolStripMenuItem)sender!;
 
-            // update the dictionary
             if (menuItem.Tag is string folderPath)
             {
+                // validate that the folder exists if user is trying to check it
+                if (menuItem.Checked && !Directory.Exists(folderPath))
+                {
+                    MessageBox.Show($"Directory '{folderPath}' does not exist!", "Warning",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    menuItem.Checked = false; // folder doesn't exist
+                    folderVisibilityStates[folderPath] = false; // ignore user setting
+                    return;
+                }
+                
                 folderVisibilityStates[folderPath] = menuItem.Checked;
             }
 
@@ -643,6 +693,12 @@ namespace LocalWallpaperViewer
             if (folderVisibilityStates.TryGetValue(assetsLockScreenDirectory, out var b) && b) visibility |= FolderVisibility.SourceB;
             if (folderVisibilityStates.TryGetValue(assetsSpotLightDirectory, out var c) && c) visibility |= FolderVisibility.SourceC;
 
+            // if nothing is selected, explicitly set to None
+            if (visibility == 0)
+            {
+                visibility = FolderVisibility.None;
+            }
+
             Settings.Default.FolderVisibilityMask = (int)visibility;
             Settings.Default.ViewMode = ViewMode;
             Settings.Default.OrientationFilter = (int)OrientationFilter;
@@ -679,6 +735,7 @@ namespace LocalWallpaperViewer
                 {
                     "All Resolutions" => ResolutionFilterStates.All,
                     "1920x1080" => ResolutionFilterStates.FullHD,
+                    "1080x1920" => ResolutionFilterStates.vFullHD,
                     "3840x2160" => ResolutionFilterStates.UltraHD,
                     _ => ResolutionFilterStates.All,
                 };
@@ -739,7 +796,7 @@ namespace LocalWallpaperViewer
             // save button
             var saveButton = new ToolStripButton
             {
-                Text = "Save to disk",
+                Text = "Save image",
                 Alignment = ToolStripItemAlignment.Left,
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
@@ -756,6 +813,22 @@ namespace LocalWallpaperViewer
                 Image = GetIconFromFont('\uE74e')
             };
 
+            // toolstrip label
+            FilesToolStripLabel = new ToolStripLabel
+            {
+                Text = "41 Pictures found (12 filtered)",
+                Alignment = ToolStripItemAlignment.Right,
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue91b')
+            };
+
+            // toolstrip separator
+            var toolStripSeparator = new ToolStripSeparator
+            {
+                Alignment = ToolStripItemAlignment.Right
+            };
+
             // settings button
             var settingsButton = new ToolStripDropDownButton
             {
@@ -765,14 +838,14 @@ namespace LocalWallpaperViewer
                 Alignment = ToolStripItemAlignment.Right,
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uE713')
+                Image = GetIconFromFont('\uE713') // cog icon
             };
 
             // show Assets Folder menu item
             var SettingsMenuItemFolder1 = new ToolStripMenuItem("Show Assets Folder")
             {
                 CheckOnClick = true,
-                Checked = true,
+                Checked = folderVisibilityStates[assetsUserDirectory],
                 Tag = assetsUserDirectory
             };
             SettingsMenuItemFolder1.CheckedChanged += OnFolderMenuItemCheckedChanged;
@@ -781,7 +854,7 @@ namespace LocalWallpaperViewer
             var SettingsMenuItemFolder2 = new ToolStripMenuItem("Show Lockscreen Folder")
             {
                 CheckOnClick = true,
-                Checked = true,
+                Checked = folderVisibilityStates[assetsLockScreenDirectory],
                 Tag = assetsLockScreenDirectory
             };
             SettingsMenuItemFolder2.CheckedChanged += OnFolderMenuItemCheckedChanged;
@@ -790,7 +863,7 @@ namespace LocalWallpaperViewer
             var SettingsMenuItemFolder3 = new ToolStripMenuItem("Show Spotlight Folder")
             {
                 CheckOnClick = true,
-                Checked = true,
+                Checked = folderVisibilityStates[assetsSpotLightDirectory],
                 Tag = assetsSpotLightDirectory
             };
             SettingsMenuItemFolder3.CheckedChanged += OnFolderMenuItemCheckedChanged;
@@ -803,10 +876,6 @@ namespace LocalWallpaperViewer
                 Image = GetIconFromFont('\ued43') // Folder icon
             };
             SettingsMenuItemSetQuickSave.Click += OnSettingsMenuItemSetQuickSaveClick;
-
-            SettingsMenuItemFolder1.Checked = folderVisibilityStates[assetsUserDirectory];
-            SettingsMenuItemFolder2.Checked = folderVisibilityStates[assetsLockScreenDirectory];
-            SettingsMenuItemFolder3.Checked = folderVisibilityStates[assetsSpotLightDirectory];
 
             // about menu item
             var SettingsMenuItemAbout = new ToolStripMenuItem("About")
@@ -836,46 +905,55 @@ namespace LocalWallpaperViewer
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uF573') // Portrait icon
+                Image = GetIconFromFont('\uee64') // Portrait icon
             };
 
             var toolStripMenuItem3 = new ToolStripMenuItem("Landscape")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uF577') // Landscape icon
+                Image = GetIconFromFont('\ue70a') // Landscape icon
             };
 
             var toolStripMenuItem4 = new ToolStripMenuItem("All Resolutions")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue740') // Resolution Arrows
+                Image = GetIconFromFont('\ue8cc') // All Resolutions Icon
             };
 
             var toolStripMenuItem5 = new ToolStripMenuItem("1920x1080")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uF577') // Landscape icon
+                Image = GetIconFromFont('\ue70a') // Landscape icon
             };
 
-            var toolStripMenuItem6 = new ToolStripMenuItem("3840x2160")
+            var toolStripMenuItem6 = new ToolStripMenuItem("1080x1920")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uF577') // Landscape icon
+                Image = GetIconFromFont('\uee64') // Portrait icon
+            };
+
+            var toolStripMenuItem7 = new ToolStripMenuItem("3840x2160")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue70a') // Landscape icon
             };
 
             _toolStrip.Items.Add(saveButton);
             _toolStrip.Items.Add(_toggleViewButton);
             _toolStrip.Items.Add(settingsButton);
+            _toolStrip.Items.Add(toolStripSeparator);
+            _toolStrip.Items.Add(FilesToolStripLabel);
 
             saveButton.Click += OnSaveButtonMenuItemClick;
 
             _toggleViewButton.Click += (s, e) =>
             {
-                ViewMode = !_thumbnailPanel?.Visible ?? true;
+                ViewMode = !ViewMode;
                 UpdateViewState();
             };
 
@@ -885,6 +963,7 @@ namespace LocalWallpaperViewer
             toolStripMenuItem4.Click += OnResolutionFilterButtonClick;
             toolStripMenuItem5.Click += OnResolutionFilterButtonClick;
             toolStripMenuItem6.Click += OnResolutionFilterButtonClick;
+            toolStripMenuItem7.Click += OnResolutionFilterButtonClick;
 
             // file tree view
             _fileTreeView = new()
@@ -914,7 +993,7 @@ namespace LocalWallpaperViewer
                 }
             };
 
-            foreach (var fileInfo in assets)
+            foreach (var fileInfo in _allAssetsCache)
             {
                 TreeNode fileNode = new(fileInfo.Name) { Tag = fileInfo };
 
@@ -926,7 +1005,7 @@ namespace LocalWallpaperViewer
                     generalNode.Nodes.Add(fileNode);
             }
 
-            if (assets.Length == 0)
+            if (_allAssetsCache.Length == 0)
             {
                 MessageBox.Show("No files found");
             }
@@ -943,7 +1022,16 @@ namespace LocalWallpaperViewer
                 ForeColor = Color.DarkGray
             };
 
-            foreach (var fileInfo in this.assets)
+            no_results_label = new Label
+            {
+                Text = "No files match selected filters",
+                Dock = DockStyle.Top,
+                Height = 30,
+                Visible = false,
+            };
+            _thumbnailPanel.Controls.Add(no_results_label);
+
+            foreach (var fileInfo in this._allAssetsCache)
             {
                 try
                 {
@@ -1051,11 +1139,12 @@ namespace LocalWallpaperViewer
 
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem4);
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem5);
+            
+            _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem7);
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem6);
             statusStrip.Items.Add(_statusStripResolutionFilterButton);
 
             InitializeFileContextMenuStrip();
-            UpdateViewState();
             ApplyFilter();
         }
     }
