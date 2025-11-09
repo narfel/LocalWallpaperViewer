@@ -46,8 +46,7 @@ namespace LocalWallpaperViewer
 {
     public partial class Form1 : Form
     {
-        private FileInfo[] _allAssetsCache;
-        private int _absoluteTotalCount;
+        private FileInfo[] _allAssetsCache = [];
         private Dictionary<PictureBox, FileInfo> pictureMap = [];
 
         private ToolStrip? _toolStrip;
@@ -98,9 +97,10 @@ namespace LocalWallpaperViewer
             public FileInfo? File { get; set; }
         }
 
-        public Form1()
+        public Form1(SplashForm? splash = null)
         {
             InitializeComponent();
+            splash?.UpdateStatus("Generating Thumbnails...");
             ViewMode = Settings.Default.ViewMode;
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
@@ -123,6 +123,7 @@ namespace LocalWallpaperViewer
                 folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
                 folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
             }
+            
             SetupUI();
         }
 
@@ -141,7 +142,6 @@ namespace LocalWallpaperViewer
                 this.assetsSpotLightDirectory
             };
             _allAssetsCache = GetAssetsFromDirectories(directories);
-            _absoluteTotalCount = _allAssetsCache.Length;
             return _allAssetsCache;
         }
 
@@ -233,7 +233,7 @@ namespace LocalWallpaperViewer
             UpdateTreeViewNodes();
 
             visibleItemCount = 0;
-            
+
             int effectiveTotalCount = 0;
 
             foreach (var container in _thumbnailPanel.Controls.OfType<Panel>())
@@ -262,7 +262,7 @@ namespace LocalWallpaperViewer
                         }
                     }
 
-                    if (visible) 
+                    if (visible)
                     {
                         effectiveTotalCount++;
                     }
@@ -297,12 +297,12 @@ namespace LocalWallpaperViewer
                     visibleItemCount++;
                 }
             }
-            
+
             LandscapeFilterActive = OrientationFilter == OrientationFilterStates.Landscape;
 
             if (no_results_label != null)
             {
-                no_results_label.Visible = visibleItemCount == 0; 
+                no_results_label.Visible = visibleItemCount == 0;
             }
 
             if (FilesToolStripLabel != null)
@@ -526,7 +526,7 @@ namespace LocalWallpaperViewer
             using var folderDialog = new FolderBrowserDialog
             {
                 Description = "Select Quick Save Folder",
-                SelectedPath = string.IsNullOrEmpty(Settings.Default.QuickSavePath) 
+                SelectedPath = string.IsNullOrEmpty(Settings.Default.QuickSavePath)
                     ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
                     : Settings.Default.QuickSavePath,
                 ShowNewFolderButton = true
@@ -562,7 +562,7 @@ namespace LocalWallpaperViewer
                     folderVisibilityStates[folderPath] = false; // ignore user setting
                     return;
                 }
-                
+
                 folderVisibilityStates[folderPath] = menuItem.Checked;
             }
 
@@ -1139,13 +1139,51 @@ namespace LocalWallpaperViewer
 
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem4);
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem5);
-            
+
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem7);
             _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem6);
             statusStrip.Items.Add(_statusStripResolutionFilterButton);
 
             InitializeFileContextMenuStrip();
             ApplyFilter();
+        }
+    }
+
+    public class SplashForm : Form
+    {
+        private Label label; // Make it a field of the class
+
+        public SplashForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Size = new Size(250, 80);
+            this.BackColor = SystemColors.ControlDark; // This will be the border color
+            this.Padding = new Padding(2); // Border thickness
+            
+            var panel = new Panel
+            {
+                BackColor = SystemColors.Control,
+                Dock = DockStyle.Fill
+            };
+            this.Controls.Add(panel);
+            
+            label = new Label
+            {
+                Text = "Loading...",
+                Font = SystemFonts.DefaultFont,
+                ForeColor = SystemColors.ControlText,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill
+            };
+            panel.Controls.Add(label);
+        }
+
+        public void UpdateStatus(string message) // Move outside the constructor
+        {
+            label.Text = message;
+            this.Refresh(); // Force immediate redraw
         }
     }
 }
