@@ -1,9 +1,10 @@
 using System;
 using System.Diagnostics;
 using System.Drawing.Imaging;
+using System.Reflection;
 using System.Windows.Forms;
 
-public static class StatusLabelExtensions
+internal static class StatusLabelExtensions
 {
     private const string DefaultMessage = "Double click an image from the list to view";
     private static System.Windows.Forms.Timer? notificationTimer;
@@ -44,7 +45,7 @@ public static class StatusLabelExtensions
 
 namespace LocalWallpaperViewer
 {
-    public partial class Form1 : Form
+    internal sealed partial class Form1 : Form
     {
         private FileInfo[] _allAssetsCache = [];
         private Dictionary<PictureBox, FileInfo> pictureMap = [];
@@ -56,7 +57,7 @@ namespace LocalWallpaperViewer
         private ToolStripStatusLabel statusStripLabel = new ToolStripStatusLabel("Double click an image from the list to view");
         private ToolStripDropDownButton? _statusStripThumbnailFilterButton;
         private ToolStripDropDownButton? _statusStripResolutionFilterButton;
-        private PictureBox? selectedThumbnail = null;
+        private PictureBox? selectedThumbnail;
         private ToolStripStatusLabel? _statusStripFilterLabel;
         private ContextMenuStrip? _fileContextMenuStrip;
         private TreeNode? generalNode;
@@ -69,8 +70,8 @@ namespace LocalWallpaperViewer
         private string assetsLockScreenDirectory = string.Empty;
         private string assetsSpotLightDirectory = string.Empty;
         private bool ViewMode;
-        private int visibleItemCount = 0;
-        private bool LandscapeFilterActive = false;
+        private int visibleItemCount;
+        private bool LandscapeFilterActive;
         private OrientationFilterStates OrientationFilter;
         private ResolutionFilterStates ResolutionFilter;
         private Dictionary<string, bool> folderVisibilityStates = [];
@@ -89,7 +90,7 @@ namespace LocalWallpaperViewer
             All = SourceA | SourceB | SourceC // 0111
         }
 
-        public class ThumbnailMetadata
+        private sealed class ThumbnailMetadata
         {
             public string? Folder { get; set; }
             public int Width { get; set; }
@@ -100,13 +101,13 @@ namespace LocalWallpaperViewer
         public Form1(SplashForm? splash = null)
         {
             InitializeComponent();
-            splash?.UpdateStatus("Generating Thumbnails...");
+            splash?.UpdateStatus($"Loading...");
             ViewMode = Settings.Default.ViewMode;
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
 
             GetAssets();
-
+            splash?.UpdateStatus($"Found {_allAssetsCache.Length} files\nGenerating thumbnails...");
             var visibility = (FolderVisibility)Settings.Default.FolderVisibilityMask;
 
             if (visibility == FolderVisibility.NotInitialized)
@@ -155,16 +156,28 @@ namespace LocalWallpaperViewer
                     .GetFiles("*.*", SearchOption.AllDirectories);
                 foreach (var file in files)
                 {
-                    if (file.Length < 50 * 1024)
+                if (file.Length < 50 * 1024)
                         continue;
                     try
                     {
                         using var img = Image.FromFile(file.FullName);
                         results.Add(file);
                     }
-                    catch
+                    catch (OutOfMemoryException)
                     {
-                        // skip if not an image
+                        // Not a valid image file or GDI+ could not create an image; skip.
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        // File disappeared between enumeration and access; skip.
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        // Insufficient permissions to read the file; skip.
+                    }
+                    catch (IOException)
+                    {
+                        // General I/O error while accessing the file; skip.
                     }
                 }
             }
@@ -208,7 +221,7 @@ namespace LocalWallpaperViewer
             UpdateNodeVisibility(nodes, spotLightNode, folderVisibilityStates[assetsSpotLightDirectory]);
         }
 
-        private void UpdateNodeVisibility(TreeNodeCollection nodes, TreeNode node, bool shouldBeVisible)
+        private static void UpdateNodeVisibility(TreeNodeCollection nodes, TreeNode node, bool shouldBeVisible)
         {
             var isCurrentlyVisible = nodes.Contains(node);
 
@@ -357,7 +370,7 @@ namespace LocalWallpaperViewer
             }
         }
 
-        private void ShowImageInPopup(FileInfo fileInfo)
+        private static void ShowImageInPopup(FileInfo fileInfo)
         {
             var img = Image.FromFile(fileInfo.FullName);
 
@@ -392,7 +405,7 @@ namespace LocalWallpaperViewer
             form.Controls.Add(pictureBox);
 
             string fileName = fileInfo.Name;
-            string clippedName = (fileName.Length > 33 && finalW < finalH) ? fileName.Substring(0, 33) + "..." : fileName;
+            string clippedName = (fileName.Length > 33 && finalW < finalH) ? string.Concat(fileName.AsSpan(0, 33), "...") : fileName;
 
             // full-width semi-transparent description bar at the bottom
             var overlay = new Label
@@ -422,6 +435,7 @@ namespace LocalWallpaperViewer
 
             form.Show();
             form.Deactivate += (s, e) => form.Close();
+            form.FormClosed += (s, e) => form.Dispose();
         }
 
         private void OnShowImageMenuItemClick(object? sender, EventArgs e)
@@ -544,7 +558,176 @@ namespace LocalWallpaperViewer
 
         private void OnSettingsMenuItemAboutClick(object? sender, EventArgs e)
         {
-            MessageBox.Show("Version 0.01 alpha", "About", MessageBoxButtons.OK, MessageBoxIcon.None);
+            var appName = Assembly.GetEntryAssembly()
+                ?.GetCustomAttribute<AssemblyProductAttribute>()
+                ?.Product ?? "My Small App";
+
+            string architecture;
+            DateTime buildTime;
+
+            try
+            {
+                // get the path to the exe
+                var assembly = Assembly.GetEntryAssembly();
+                if (assembly != null)
+                {
+                    // use file info, good enough for me
+                    buildTime = File.GetLastWriteTime(assembly.Location);
+                }
+                else
+                {
+                    buildTime = DateTime.MinValue;
+                }
+            }
+            catch
+            {
+                buildTime = DateTime.MinValue;
+            }
+
+            string buildTimeString = buildTime == DateTime.MinValue 
+                ? "Unknown" 
+                : buildTime.ToString("yyyy-MM-dd HH:mm:ss");
+
+            if (Environment.Is64BitProcess)
+            {
+                architecture = "64-bit";
+            }
+            else
+            {
+                architecture = "32-bit";
+            }
+
+            Form aboutForm = new()
+            {
+                Text = $"About {appName}",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(450, 350)
+            };
+
+            TableLayoutPanel tableLayoutPanel = new()
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10),
+
+                ColumnCount = 2
+            };
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            tableLayoutPanel.RowCount = 6;
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // Name
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F)); // Version
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Buildtime
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Link
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // License
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // OK Button
+
+            // app icon
+            PictureBox iconPictureBox = new PictureBox
+            {
+                Dock = DockStyle.Top,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Image = Icon?.ToBitmap()
+            };
+            tableLayoutPanel.Controls.Add(iconPictureBox, 0, 0);
+            tableLayoutPanel.SetRowSpan(iconPictureBox, 4); // span across the top 4 rows
+
+            // application name
+            Label AppNameLabel = new()
+            { 
+                Text = appName, 
+                Font = new Font(this.Font.FontFamily, 14, FontStyle.Bold),
+                Dock = DockStyle.Top, 
+                TextAlign = ContentAlignment.MiddleLeft 
+            };
+            tableLayoutPanel.Controls.Add(AppNameLabel, 1, 0);
+
+            // version label
+            Label VersionLabel = new()
+            { 
+                Text = $"Version {Application.ProductVersion[..Application.ProductVersion.LastIndexOf('+')]} ({architecture})", 
+                Dock = DockStyle.Top, 
+                TextAlign = ContentAlignment.MiddleLeft 
+            };
+            tableLayoutPanel.Controls.Add(VersionLabel, 1, 1);
+            
+            // description label
+            Label BuildTimeLabel = new()
+            {
+                Text = $"Build Time: {buildTimeString}",
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            tableLayoutPanel.Controls.Add(BuildTimeLabel, 1, 2);
+
+            // github link label
+            LinkLabel GithubLinkLabel = new LinkLabel
+            {
+                Text = "Github Repo",
+                Tag = "https://github.com/", 
+                Dock = DockStyle.Top
+            };
+            GithubLinkLabel.LinkClicked += (s, args) => 
+            {
+                var filename = GithubLinkLabel.Tag.ToString();
+                if (filename != null)
+                {
+                    Process.Start(new ProcessStartInfo(filename) { UseShellExecute = true });
+                }
+            };
+            tableLayoutPanel.Controls.Add(GithubLinkLabel, 1, 3);
+
+            // license
+            var licenseGroupBox = new GroupBox
+            {
+                Dock = DockStyle.Fill,
+                Text = "GNU General Public License",
+                BackColor = SystemColors.Control
+            };
+
+            var licenseText = new RichTextBox
+            {
+                DetectUrls = true,
+                Multiline = true,
+                ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                Dock = DockStyle.Fill,
+                Text = @"This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or at your option any later version.
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details. 
+You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>."
+            };
+            licenseText.LinkClicked += (s, args) => 
+            {
+                var url = args.LinkText;
+                if (!string.IsNullOrEmpty(url))
+                {
+                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                }
+            };
+
+            licenseGroupBox.Controls.Add(licenseText);
+            tableLayoutPanel.Controls.Add(licenseGroupBox, 0, 4);
+            tableLayoutPanel.SetColumnSpan(licenseGroupBox, 2); // span both icon and info cols
+
+            Button okButton = new Button();
+            okButton.Text = "&OK";
+            okButton.DialogResult = DialogResult.OK;
+            okButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+            FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
+            buttonPanel.FlowDirection = FlowDirection.RightToLeft;
+            buttonPanel.Dock = DockStyle.Fill;
+            buttonPanel.Controls.Add(okButton);
+            
+            tableLayoutPanel.Controls.Add(buttonPanel, 0, 5);
+            tableLayoutPanel.SetColumnSpan(buttonPanel, 2); // span both icon and info cols
+
+            aboutForm.Controls.Add(tableLayoutPanel);
+            aboutForm.ShowDialog(this); 
         }
 
         private void OnFolderMenuItemCheckedChanged(object? sender, EventArgs e)
@@ -898,7 +1081,7 @@ namespace LocalWallpaperViewer
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uE8a9') // All images icon
+                Image = GetIconFromFont('\ue740') // All images icon
             };
 
             var toolStripMenuItem2 = new ToolStripMenuItem("Portrait")
@@ -1096,9 +1279,21 @@ namespace LocalWallpaperViewer
                     this._thumbnailPanel.Controls.Add(container);
                     this.pictureMap[picBox] = fileInfo;
                 }
-                catch
+                catch (OutOfMemoryException)
                 {
-                    // ignore invalid files
+                    // Not a valid image file or GDI+ could not create an image; skip.
+                }
+                catch (FileNotFoundException)
+                {
+                    // File disappeared between enumeration and access; skip.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Insufficient permissions to read the file; skip.
+                }
+                catch (IOException)
+                {
+                    // General I/O error while accessing the file; skip.
                 }
             }
 
@@ -1115,7 +1310,7 @@ namespace LocalWallpaperViewer
                 Text = "Show All",
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uE8a9') // all images icon
+                Image = GetIconFromFont('\ue740') // all images icon
             };
 
             _statusStripResolutionFilterButton = new ToolStripDropDownButton
@@ -1123,7 +1318,7 @@ namespace LocalWallpaperViewer
                 Text = "All Resolutions",
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue740') // resolution Arrows
+                Image = GetIconFromFont('\ue740') // all resolution
             };
 
             // add controls to form
@@ -1149,18 +1344,18 @@ namespace LocalWallpaperViewer
         }
     }
 
-    public class SplashForm : Form
+    internal sealed class SplashForm : Form
     {
-        private Label label; // Make it a field of the class
+        private Label label;
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.Size = new Size(250, 80);
-            this.BackColor = SystemColors.ControlDark; // This will be the border color
-            this.Padding = new Padding(2); // Border thickness
-            
+            this.BackColor = SystemColors.ControlDark;
+            this.Padding = new Padding(2);
+
             var panel = new Panel
             {
                 BackColor = SystemColors.Control,
@@ -1170,20 +1365,19 @@ namespace LocalWallpaperViewer
             
             label = new Label
             {
-                Text = "Loading...",
                 Font = SystemFonts.DefaultFont,
                 ForeColor = SystemColors.ControlText,
                 AutoSize = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
             };
             panel.Controls.Add(label);
         }
 
-        public void UpdateStatus(string message) // Move outside the constructor
+        public void UpdateStatus(string message)
         {
-            label.Text = message;
-            this.Refresh(); // Force immediate redraw
+            label.Text = message.Replace("\\n", "\n");
+            this.Refresh(); // force redraw
         }
     }
 }
