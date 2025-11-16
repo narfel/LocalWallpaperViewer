@@ -65,6 +65,8 @@ namespace LocalWallpaperViewer
         private TreeNode? spotLightNode;
         private Label? no_results_label;
         private ToolStripLabel? FilesToolStripLabel;
+        private ImageList? treeViewIcons;
+        private Panel? _contentPanel;
 
         private string assetsUserDirectory = string.Empty;
         private string assetsLockScreenDirectory = string.Empty;
@@ -106,6 +108,18 @@ namespace LocalWallpaperViewer
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
 
+            var asm = Assembly.GetExecutingAssembly();
+            using var stream = asm.GetManifestResourceStream("LocalWallpaperViewer.Assets.lwv.ico");
+            if (stream != null)
+            {
+                this.Icon = new System.Drawing.Icon(stream);
+            }
+            else
+            {
+                var names = string.Join("\n", asm.GetManifestResourceNames());
+                System.Diagnostics.Debug.WriteLine("Resources:\n" + names);
+            }
+
             GetAssets();
             splash?.UpdateStatus($"Found {_allAssetsCache.Length} files\nGenerating thumbnails...");
             var visibility = (FolderVisibility)Settings.Default.FolderVisibilityMask;
@@ -124,7 +138,7 @@ namespace LocalWallpaperViewer
                 folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
                 folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
             }
-            
+
             SetupUI();
         }
 
@@ -156,7 +170,7 @@ namespace LocalWallpaperViewer
                     .GetFiles("*.*", SearchOption.AllDirectories);
                 foreach (var file in files)
                 {
-                if (file.Length < 50 * 1024)
+                    if (file.Length < 50 * 1024)
                         continue;
                     try
                     {
@@ -449,13 +463,13 @@ namespace LocalWallpaperViewer
 
                 FileInfo? fileInfo = null;
 
-                // the context menu was opened on a PictureBox in the FlowLayoutPanel
+                // context menu was opened on a PictureBox in the FlowLayoutPanel
                 if (contextMenu.SourceControl is PictureBox pictureBox &&
                     pictureMap.TryGetValue(pictureBox, out var pictureFileInfo))
                 {
                     fileInfo = pictureFileInfo;
                 }
-                // the context menu was opened on the TreeView
+                // context menu was opened on the TreeView
                 else if (contextMenu.SourceControl is TreeView treeView &&
                         treeView.SelectedNode?.Tag is FileInfo nodeFileInfo)
                 {
@@ -558,21 +572,27 @@ namespace LocalWallpaperViewer
 
         private void OnSettingsMenuItemAboutClick(object? sender, EventArgs e)
         {
+            // get app name
             var appName = Assembly.GetEntryAssembly()
                 ?.GetCustomAttribute<AssemblyProductAttribute>()
-                ?.Product ?? "My Small App";
+                ?.Product ?? "Local Wallpaper Viewer";
 
             string architecture;
             DateTime buildTime;
 
+            // get buildtime
             try
             {
-                // get the path to the exe
+            #if DEBUG
                 var assembly = Assembly.GetEntryAssembly();
-                if (assembly != null)
+                string? filePath = assembly?.Location;
+            #else
+                string? filePath = Environment.ProcessPath;
+            #endif
+
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
-                    // use file info, good enough for me
-                    buildTime = File.GetLastWriteTime(assembly.Location);
+                    buildTime = File.GetLastWriteTime(filePath);
                 }
                 else
                 {
@@ -584,10 +604,11 @@ namespace LocalWallpaperViewer
                 buildTime = DateTime.MinValue;
             }
 
-            string buildTimeString = buildTime == DateTime.MinValue 
-                ? "Unknown" 
+            string buildTimeString = buildTime == DateTime.MinValue
+                ? "Unknown"
                 : buildTime.ToString("yyyy-MM-dd HH:mm:ss");
 
+            // get architecture
             if (Environment.Is64BitProcess)
             {
                 architecture = "64-bit";
@@ -605,7 +626,7 @@ namespace LocalWallpaperViewer
                 MinimizeBox = false,
                 ShowInTaskbar = false,
                 StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(450, 350)
+                ClientSize = new Size(450, 335)
             };
 
             TableLayoutPanel tableLayoutPanel = new()
@@ -638,23 +659,23 @@ namespace LocalWallpaperViewer
 
             // application name
             Label AppNameLabel = new()
-            { 
-                Text = appName, 
+            {
+                Text = appName,
                 Font = new Font(this.Font.FontFamily, 14, FontStyle.Bold),
-                Dock = DockStyle.Top, 
-                TextAlign = ContentAlignment.MiddleLeft 
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
             };
             tableLayoutPanel.Controls.Add(AppNameLabel, 1, 0);
 
             // version label
             Label VersionLabel = new()
-            { 
-                Text = $"Version {Application.ProductVersion[..Application.ProductVersion.LastIndexOf('+')]} ({architecture})", 
-                Dock = DockStyle.Top, 
-                TextAlign = ContentAlignment.MiddleLeft 
+            {
+                Text = $"Version {Application.ProductVersion[..Application.ProductVersion.LastIndexOf('+')]} ({architecture})",
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
             };
             tableLayoutPanel.Controls.Add(VersionLabel, 1, 1);
-            
+
             // description label
             Label BuildTimeLabel = new()
             {
@@ -668,10 +689,10 @@ namespace LocalWallpaperViewer
             LinkLabel GithubLinkLabel = new LinkLabel
             {
                 Text = "Github Repo",
-                Tag = "https://github.com/", 
+                Tag = "https://github.com/",
                 Dock = DockStyle.Top
             };
-            GithubLinkLabel.LinkClicked += (s, args) => 
+            GithubLinkLabel.LinkClicked += (s, args) =>
             {
                 var filename = GithubLinkLabel.Tag.ToString();
                 if (filename != null)
@@ -700,7 +721,7 @@ namespace LocalWallpaperViewer
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details. 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>."
             };
-            licenseText.LinkClicked += (s, args) => 
+            licenseText.LinkClicked += (s, args) =>
             {
                 var url = args.LinkText;
                 if (!string.IsNullOrEmpty(url))
@@ -722,12 +743,12 @@ You should have received a copy of the GNU General Public License along with thi
             buttonPanel.FlowDirection = FlowDirection.RightToLeft;
             buttonPanel.Dock = DockStyle.Fill;
             buttonPanel.Controls.Add(okButton);
-            
+
             tableLayoutPanel.Controls.Add(buttonPanel, 0, 5);
             tableLayoutPanel.SetColumnSpan(buttonPanel, 2); // span both icon and info cols
 
             aboutForm.Controls.Add(tableLayoutPanel);
-            aboutForm.ShowDialog(this); 
+            aboutForm.ShowDialog(this);
         }
 
         private void OnFolderMenuItemCheckedChanged(object? sender, EventArgs e)
@@ -1148,18 +1169,44 @@ You should have received a copy of the GNU General Public License along with thi
             toolStripMenuItem6.Click += OnResolutionFilterButtonClick;
             toolStripMenuItem7.Click += OnResolutionFilterButtonClick;
 
+            // file tree view image list
+            treeViewIcons = new ImageList { ImageSize = new Size(16, 16) };
+            treeViewIcons.Images.Add("folder", GetIconFromFont('\ue8b7'));
+            treeViewIcons.Images.Add("folderopen", GetIconFromFont('\ue838'));
+            treeViewIcons.Images.Add("file", GetIconFromFont('\ueb9f'));
+
+            _contentPanel = new Panel
+            {
+                Dock = DockStyle.Fill
+            };
+
             // file tree view
             _fileTreeView = new()
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.DarkGray,
-                AutoSize = true
+                BackColor = Color.FromArgb(230, 230, 230),
+                AutoSize = true,
+                ImageList = treeViewIcons,
+                ImageIndex = 0,
+                SelectedImageIndex = 1,
+                Visible = false
             };
 
-            generalNode = new("Assets folder");
-            lockscreenNode = new("Lockscreen folder");
-            spotLightNode = new("SpotLight folder");
+            generalNode = new("Assets folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
+            };
+            lockscreenNode = new("Lockscreen folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
+            };
+            spotLightNode = new("SpotLight folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
+            };
 
             _fileTreeView.Nodes.Add(generalNode);
             _fileTreeView.Nodes.Add(lockscreenNode);
@@ -1178,7 +1225,12 @@ You should have received a copy of the GNU General Public License along with thi
 
             foreach (var fileInfo in _allAssetsCache)
             {
-                TreeNode fileNode = new(fileInfo.Name) { Tag = fileInfo };
+                TreeNode fileNode = new(fileInfo.Name)
+                {
+                    Tag = fileInfo,
+                    ImageIndex = 2,
+                    SelectedImageIndex = 2
+                };
 
                 if (fileInfo.FullName.StartsWith(assetsLockScreenDirectory, StringComparison.OrdinalIgnoreCase))
                     lockscreenNode.Nodes.Add(fileNode);
@@ -1202,7 +1254,8 @@ You should have received a copy of the GNU General Public License along with thi
                 FlowDirection = FlowDirection.LeftToRight,
                 Padding = new Padding(20, 20, 5, 20),
                 BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.DarkGray
+                ForeColor = Color.DarkGray,
+                Visible = true
             };
 
             no_results_label = new Label
@@ -1297,6 +1350,9 @@ You should have received a copy of the GNU General Public License along with thi
                 }
             }
 
+            _contentPanel.Controls.Add(_fileTreeView);
+            _contentPanel.Controls.Add(_thumbnailPanel);
+
             // status strip
             var statusStrip = new StatusStrip { ShowItemToolTips = true };
             statusStrip.Items.Add(statusStripLabel);
@@ -1321,11 +1377,9 @@ You should have received a copy of the GNU General Public License along with thi
                 Image = GetIconFromFont('\ue740') // all resolution
             };
 
-            // add controls to form
-            Controls.Add(_fileTreeView);
-            Controls.Add(_thumbnailPanel);
-            Controls.Add(_toolStrip);
-            Controls.Add(statusStrip);
+            Controls.Add(_contentPanel);  // The container with Fill
+            Controls.Add(_toolStrip);     // Top toolbar
+            Controls.Add(statusStrip);    // Bottom status
 
             _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem1);
             _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem2);
@@ -1362,7 +1416,7 @@ You should have received a copy of the GNU General Public License along with thi
                 Dock = DockStyle.Fill
             };
             this.Controls.Add(panel);
-            
+
             label = new Label
             {
                 Font = SystemFonts.DefaultFont,

@@ -19,6 +19,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\lwv.ico" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ApplicationIcon>Assets\lwv.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
     <Compile Update="Settings.Designer.cs">
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
       <AutoGen>True</AutoGen>
