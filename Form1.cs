@@ -1,8 +1,6 @@
-using System;
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Reflection;
-using System.Windows.Forms;
 
 namespace LocalWallpaperViewer
 {
@@ -10,32 +8,31 @@ namespace LocalWallpaperViewer
     {
         private System.ComponentModel.Container? components = null;
         private FileInfo[] _allAssetsCache = [];
-        private Dictionary<PictureBox, FileInfo> pictureMap = [];
+        private Dictionary<PictureBox, FileInfo> _pictureMap = [];
 
-        private ToolStrip? _toolStrip;
         private ToolStripButton? _toggleViewButton;
         private FlowLayoutPanel? _thumbnailPanel;
         private TreeView? _fileTreeView;
-        private ToolStripStatusLabel statusStripLabel = new ToolStripStatusLabel("Double click an image from the list to view");
+        private ToolStripStatusLabel _statusStripLabel = new ToolStripStatusLabel("Double click an image from the list to view");
         private ToolStripDropDownButton? _statusStripThumbnailFilterButton;
         private ToolStripDropDownButton? _statusStripResolutionFilterButton;
-        private PictureBox? selectedThumbnail;
+        private PictureBox? _selectedThumbnail;
         private ToolStripStatusLabel? _statusStripFilterLabel;
         private ContextMenuStrip? _fileContextMenuStrip;
-        private TreeNode? generalNode;
-        private TreeNode? lockscreenNode;
-        private TreeNode? spotLightNode;
-        private Label? no_results_label;
-        private ToolStripLabel? FilesToolStripLabel;
-        private ImageList? treeViewIcons;
-        private Panel? _contentPanel;
+        private TreeNode? _generalNode;
+        private TreeNode? _lockscreenNode;
+        private TreeNode? _spotLightNode;
+        private Label? _no_results_label;
+        private ToolStripLabel? _filesToolStripLabel;
+        private ImageList? _treeViewIcons;
 
-        private string assetsUserDirectory = string.Empty;
-        private string assetsLockScreenDirectory = string.Empty;
-        private string assetsSpotLightDirectory = string.Empty;
-        private bool ViewMode;
+        private string _assetsUserDirectory = string.Empty;
+        private string _assetsLockScreenDirectory = string.Empty;
+        private string _assetsSpotLightDirectory = string.Empty;
         private int visibleItemCount;
-        private bool LandscapeFilterActive;
+        private bool _viewMode;
+        private bool _isLandscapeFilterActive;
+
         private OrientationFilterStates OrientationFilter;
         private ResolutionFilterStates ResolutionFilter;
         private Dictionary<string, bool> folderVisibilityStates = [];
@@ -74,11 +71,18 @@ namespace LocalWallpaperViewer
         public Form1(SplashForm? splash = null)
         {
             InitializeComponent();
-            splash?.UpdateStatus($"Scanning Folders...");
-            ViewMode = Settings.Default.ViewMode;
-            OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
-            ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
+            LoadMainSettings();
+            SetupAppIcon();
+            LoadAssets(splash);
+            InitializeFolderVisibility();
+            SetupUI();
+            PopulateTreeView();
+            PopulateThumbnails();
+            ApplyFilter();
+        }
 
+        public void SetupAppIcon()
+        {
             var asm = Assembly.GetExecutingAssembly();
             using var stream = asm.GetManifestResourceStream("LocalWallpaperViewer.Assets.lwv.ico");
             if (stream != null)
@@ -90,42 +94,55 @@ namespace LocalWallpaperViewer
                 var names = string.Join("\n", asm.GetManifestResourceNames());
                 System.Diagnostics.Debug.WriteLine("Resources:\n" + names);
             }
+        }
 
+        private void LoadMainSettings()
+        {
+            _viewMode = Settings.Default.ViewMode;
+            OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
+            ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
+        }
+
+        private void LoadAssets(SplashForm? splash)
+        {
+            splash?.UpdateStatus($"Scanning Folders...");
             GetAssets();
             splash?.UpdateStatus($"Found {_allAssetsCache.Length} files\nGenerating thumbnails...");
+        }
+
+        private void InitializeFolderVisibility()
+        {
             var visibility = (FolderVisibility)Settings.Default.FolderVisibilityMask;
 
             if (visibility == FolderVisibility.NotInitialized)
             {
-                // first run
-                folderVisibilityStates[assetsUserDirectory] = Directory.Exists(assetsUserDirectory);
-                folderVisibilityStates[assetsLockScreenDirectory] = Directory.Exists(assetsLockScreenDirectory);
-                folderVisibilityStates[assetsSpotLightDirectory] = Directory.Exists(assetsSpotLightDirectory);
+                // First run - check if directories exist
+                folderVisibilityStates[_assetsUserDirectory] = Directory.Exists(_assetsUserDirectory);
+                folderVisibilityStates[_assetsLockScreenDirectory] = Directory.Exists(_assetsLockScreenDirectory);
+                folderVisibilityStates[_assetsSpotLightDirectory] = Directory.Exists(_assetsSpotLightDirectory);
             }
             else
             {
-                // or use saved settings
-                folderVisibilityStates[assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
-                folderVisibilityStates[assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
-                folderVisibilityStates[assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
+                // Use saved settings
+                folderVisibilityStates[_assetsUserDirectory] = visibility.HasFlag(FolderVisibility.SourceA);
+                folderVisibilityStates[_assetsLockScreenDirectory] = visibility.HasFlag(FolderVisibility.SourceB);
+                folderVisibilityStates[_assetsSpotLightDirectory] = visibility.HasFlag(FolderVisibility.SourceC);
             }
-
-            SetupUI();
         }
 
         private FileInfo[] GetAssets()
         {
             var userDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            this.assetsUserDirectory = Path.Combine(userDirectory, @"AppData\Local\Packages\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\LocalState\Assets");
-            this.assetsLockScreenDirectory = Path.Combine(userDirectory, @"AppData\Roaming\Microsoft\Windows\Themes");
-            this.assetsSpotLightDirectory = Path.Combine(userDirectory, @"AppData\Local\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\LocalCache\Microsoft\IrisService");
+            this._assetsUserDirectory = Path.Combine(userDirectory, @"AppData\Local\Packages\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\LocalState\Assets");
+            this._assetsLockScreenDirectory = Path.Combine(userDirectory, @"AppData\Roaming\Microsoft\Windows\Themes");
+            this._assetsSpotLightDirectory = Path.Combine(userDirectory, @"AppData\Local\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\LocalCache\Microsoft\IrisService");
 
             var directories = new[]
             {
-                this.assetsUserDirectory,
-                this.assetsLockScreenDirectory,
-                this.assetsSpotLightDirectory
+                this._assetsUserDirectory,
+                this._assetsLockScreenDirectory,
+                this._assetsSpotLightDirectory
             };
             _allAssetsCache = GetAssetsFromDirectories(directories);
             return _allAssetsCache;
@@ -192,18 +209,18 @@ namespace LocalWallpaperViewer
         private void UpdateTreeViewNodes()
         {
             if (_fileTreeView == null ||
-                generalNode == null ||
-                lockscreenNode == null ||
-                spotLightNode == null
+                _generalNode == null ||
+                _lockscreenNode == null ||
+                _spotLightNode == null
                 )
             {
                 return;
             }
 
             var nodes = _fileTreeView.Nodes;
-            UpdateNodeVisibility(nodes, generalNode, folderVisibilityStates[assetsUserDirectory]);
-            UpdateNodeVisibility(nodes, lockscreenNode, folderVisibilityStates[assetsLockScreenDirectory]);
-            UpdateNodeVisibility(nodes, spotLightNode, folderVisibilityStates[assetsSpotLightDirectory]);
+            UpdateNodeVisibility(nodes, _generalNode, folderVisibilityStates[_assetsUserDirectory]);
+            UpdateNodeVisibility(nodes, _lockscreenNode, folderVisibilityStates[_assetsLockScreenDirectory]);
+            UpdateNodeVisibility(nodes, _spotLightNode, folderVisibilityStates[_assetsSpotLightDirectory]);
         }
 
         private static void UpdateNodeVisibility(TreeNodeCollection nodes, TreeNode node, bool shouldBeVisible)
@@ -247,7 +264,7 @@ namespace LocalWallpaperViewer
                 {
                     visible = true;
 
-                    // folder filter:
+                    // folder filter
                     if (visible && meta.Folder != null)
                     {
                         foreach (var record in folderVisibilityStates)
@@ -296,16 +313,16 @@ namespace LocalWallpaperViewer
                 }
             }
 
-            LandscapeFilterActive = OrientationFilter == OrientationFilterStates.Landscape;
+            _isLandscapeFilterActive = OrientationFilter == OrientationFilterStates.Landscape;
 
-            if (no_results_label != null)
+            if (_no_results_label != null)
             {
-                no_results_label.Visible = visibleItemCount == 0;
+                _no_results_label.Visible = visibleItemCount == 0;
             }
 
-            if (FilesToolStripLabel != null)
+            if (_filesToolStripLabel != null)
             {
-                FilesToolStripLabel.Text = $"Showing {visibleItemCount} of {effectiveTotalCount} files";
+                _filesToolStripLabel.Text = $"Showing {visibleItemCount} of {effectiveTotalCount} files";
             }
             UpdateFilterButton();
             UpdateViewState();
@@ -436,7 +453,7 @@ namespace LocalWallpaperViewer
 
                 // context menu was opened on a PictureBox in the FlowLayoutPanel
                 if (contextMenu.SourceControl is PictureBox pictureBox &&
-                    pictureMap.TryGetValue(pictureBox, out var pictureFileInfo))
+                    _pictureMap.TryGetValue(pictureBox, out var pictureFileInfo))
                 {
                     fileInfo = pictureFileInfo;
                 }
@@ -468,7 +485,7 @@ namespace LocalWallpaperViewer
 
                 // if PictureBox in the FlowLayoutPanel
                 if (contextMenu.SourceControl is PictureBox pictureBox &&
-                    pictureMap.TryGetValue(pictureBox, out var pictureFileInfo))
+                    _pictureMap.TryGetValue(pictureBox, out var pictureFileInfo))
                 {
                     fileInfo = pictureFileInfo;
                 }
@@ -486,11 +503,11 @@ namespace LocalWallpaperViewer
 
                     if (directory != null)
                     {
-                        if (directory.StartsWith(assetsLockScreenDirectory, StringComparison.OrdinalIgnoreCase))
+                        if (directory.StartsWith(_assetsLockScreenDirectory, StringComparison.OrdinalIgnoreCase))
                         {
                             Process.Start(new ProcessStartInfo { Arguments = directory, FileName = "explorer.exe" });
                         }
-                        else if (directory.StartsWith(assetsSpotLightDirectory, StringComparison.OrdinalIgnoreCase))
+                        else if (directory.StartsWith(_assetsSpotLightDirectory, StringComparison.OrdinalIgnoreCase))
                         {
                             Process.Start(new ProcessStartInfo { Arguments = directory, FileName = "explorer.exe" });
                         }
@@ -506,7 +523,7 @@ namespace LocalWallpaperViewer
         private void OnPictureBoxDoubleClick(object? sender, EventArgs e)
         {
             if (sender is PictureBox pictureBox &&
-                pictureMap.TryGetValue(pictureBox, out var fileInfo))
+                _pictureMap.TryGetValue(pictureBox, out var fileInfo))
             {
                 ShowImageInPopup(fileInfo);
             }
@@ -584,8 +601,8 @@ namespace LocalWallpaperViewer
                 selectedFile = selectedFileFromTree;
             }
             else if (_thumbnailPanel?.Visible == true &&
-                    selectedThumbnail != null &&
-                    this.pictureMap.TryGetValue(selectedThumbnail, out var fileFromThumbnail))
+                    _selectedThumbnail != null &&
+                    this._pictureMap.TryGetValue(_selectedThumbnail, out var fileFromThumbnail))
             {
                 selectedFile = fileFromThumbnail;
             }
@@ -621,8 +638,8 @@ namespace LocalWallpaperViewer
                 selectedFile = selectedFileFromTree;
             }
             else if (_thumbnailPanel?.Visible == true &&
-                    selectedThumbnail != null &&
-                    this.pictureMap.TryGetValue(selectedThumbnail, out var fileFromThumbnail))
+                    _selectedThumbnail != null &&
+                    this._pictureMap.TryGetValue(_selectedThumbnail, out var fileFromThumbnail))
             {
                 selectedFile = fileFromThumbnail;
             }
@@ -652,7 +669,7 @@ namespace LocalWallpaperViewer
                 using var img = Image.FromFile(selectedFile.FullName);
                 img.Save(savePath, ImageFormat.Jpeg);
 
-                this.statusStripLabel.ShowTemporaryNotification($"Image saved to: {savePath}");
+                this._statusStripLabel.ShowTemporaryNotification($"Image saved to: {savePath}");
             }
             else
             {
@@ -664,7 +681,7 @@ namespace LocalWallpaperViewer
         private void UpdateViewState()
         {
             // clear previous selection
-            selectedThumbnail = null;
+            _selectedThumbnail = null;
 
             if (_thumbnailPanel == null ||
                 _fileTreeView == null ||
@@ -681,23 +698,23 @@ namespace LocalWallpaperViewer
                 container.BorderStyle = BorderStyle.None;
             }
 
-            _thumbnailPanel.Visible = ViewMode;
-            _fileTreeView.Visible = !ViewMode;
-            _toggleViewButton.Text = ViewMode ? "Show file list" : "Show thumbnails";
-            _toggleViewButton.Image = ViewMode ? GetIconFromFont('\uE9a4') : GetIconFromFont('\uE91b');
-            _statusStripFilterLabel.Visible = ViewMode;
-            _statusStripThumbnailFilterButton.Visible = ViewMode;
-            _statusStripResolutionFilterButton.Visible = LandscapeFilterActive;
-            _statusStripResolutionFilterButton.Visible = ViewMode;
+            _thumbnailPanel.Visible = _viewMode;
+            _fileTreeView.Visible = !_viewMode;
+            _toggleViewButton.Text = _viewMode ? "Show file list" : "Show thumbnails";
+            _toggleViewButton.Image = _viewMode ? GetIconFromFont('\uE9a4') : GetIconFromFont('\uE91b');
+            _statusStripFilterLabel.Visible = _viewMode;
+            _statusStripThumbnailFilterButton.Visible = _viewMode;
+            _statusStripResolutionFilterButton.Visible = _isLandscapeFilterActive;
+            _statusStripResolutionFilterButton.Visible = _viewMode;
         }
 
         private void SaveSettings()
         {
             // convert dict to bitmask
             FolderVisibility visibility = 0;
-            if (folderVisibilityStates.TryGetValue(assetsUserDirectory, out var a) && a) visibility |= FolderVisibility.SourceA;
-            if (folderVisibilityStates.TryGetValue(assetsLockScreenDirectory, out var b) && b) visibility |= FolderVisibility.SourceB;
-            if (folderVisibilityStates.TryGetValue(assetsSpotLightDirectory, out var c) && c) visibility |= FolderVisibility.SourceC;
+            if (folderVisibilityStates.TryGetValue(_assetsUserDirectory, out var a) && a) visibility |= FolderVisibility.SourceA;
+            if (folderVisibilityStates.TryGetValue(_assetsLockScreenDirectory, out var b) && b) visibility |= FolderVisibility.SourceB;
+            if (folderVisibilityStates.TryGetValue(_assetsSpotLightDirectory, out var c) && c) visibility |= FolderVisibility.SourceC;
 
             // if nothing is selected, explicitly set to None
             if (visibility == 0)
@@ -706,7 +723,7 @@ namespace LocalWallpaperViewer
             }
 
             Settings.Default.FolderVisibilityMask = (int)visibility;
-            Settings.Default.ViewMode = ViewMode;
+            Settings.Default.ViewMode = _viewMode;
             Settings.Default.OrientationFilter = (int)OrientationFilter;
             Settings.Default.ResolutionFilter = (int)ResolutionFilter;
             Settings.Default.Save();
@@ -791,30 +808,171 @@ namespace LocalWallpaperViewer
             return bitmap;
         }
 
-        protected override void Dispose(bool disposing)
+        private void OnThumbnailMouseClick(object? sender, MouseEventArgs e)
         {
-            if (disposing && (components != null))
+            if (_selectedThumbnail != null && _selectedThumbnail.Parent is Panel oldContainer)
             {
-                components.Dispose();
+                oldContainer.BorderStyle = BorderStyle.None;
             }
-            base.Dispose(disposing);
-        }
-
-        private void InitializeComponent()
-        {
-            this.components = new System.ComponentModel.Container();
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
-            this.Text = "Local Background Image Viewer";
-        }
-
-        private void SetupUI()
-        {
-            // top Toolbar
-            _toolStrip = new ToolStrip
+            _selectedThumbnail = (PictureBox?)sender; // cast sender to PictureBox
+            if (_selectedThumbnail != null && _selectedThumbnail.Parent is Panel newContainer)
             {
-                Dock = DockStyle.Top
+                newContainer.BorderStyle = BorderStyle.FixedSingle;
+            }
+            if (e.Button == MouseButtons.Right && sender is PictureBox clickedPictureBox)
+            {
+                // display the context menu at the cursor's location
+                _fileContextMenuStrip?.Show(clickedPictureBox, e.Location);
+            }
+        }
+
+        private void PopulateTreeView()
+        {
+            _generalNode = new("Assets folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
             };
+            _lockscreenNode = new("Lockscreen folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
+            };
+            _spotLightNode = new("SpotLight folder")
+            {
+                ImageIndex = 0,
+                SelectedImageIndex = 1
+            };
+
+            if (_fileTreeView == null) return;
+
+            _fileTreeView.Nodes.Add(_generalNode);
+            _fileTreeView.Nodes.Add(_lockscreenNode);
+            _fileTreeView.Nodes.Add(_spotLightNode);
+
+            _fileTreeView.ExpandAll();
+
+            this._fileTreeView.BeginUpdate(); // Suspend drawing for performance
+
+            foreach (var fileInfo in _allAssetsCache)
+            {
+                TreeNode fileNode = new(fileInfo.Name)
+                {
+                    Tag = fileInfo,
+                    ImageIndex = 2,
+                    SelectedImageIndex = 2
+                };
+
+                if (fileInfo.FullName.StartsWith(_assetsLockScreenDirectory, StringComparison.OrdinalIgnoreCase))
+                    _lockscreenNode.Nodes.Add(fileNode);
+                else if (fileInfo.FullName.StartsWith(_assetsSpotLightDirectory, StringComparison.OrdinalIgnoreCase))
+                    _spotLightNode.Nodes.Add(fileNode);
+                else
+                    _generalNode.Nodes.Add(fileNode);
+            }
+
+            if (_allAssetsCache.Length == 0)
+            {
+                MessageBox.Show("No files found");
+            }
+
+            this._fileTreeView.EndUpdate(); // Resume drawing
+        }
+
+        private void PopulateThumbnails()
+        {
+            if (_thumbnailPanel == null)
+            {
+                return;
+            }
+
+            foreach (var fileInfo in this._allAssetsCache)
+            {
+                try
+                {
+                    var container = CreateThumbnailContainer(fileInfo);
+                    this._thumbnailPanel.Controls.Add(container);
+                }
+                catch (OutOfMemoryException)
+                {
+                    // Not a valid image file or GDI+ could not create an image; skip.
+                }
+                catch (FileNotFoundException)
+                {
+                    // File disappeared between enumeration and access; skip.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Insufficient permissions to read the file; skip.
+                }
+                catch (IOException)
+                {
+                    // General I/O error while accessing the file; skip.
+                }
+            }
+        }
+
+        private Panel CreateThumbnailContainer(FileInfo fileInfo)
+        {
+            using var tempImage = Image.FromFile(fileInfo.FullName);
+            var thumbnail = CreateThumbnail(tempImage, new Size(100, 60));
+
+            var picBox = new PictureBox
+            {
+                Image = thumbnail,
+                Dock = DockStyle.Top,
+                Height = 60,
+                Width = 100,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Cursor = Cursors.Hand,
+            };
+
+            picBox.DoubleClick += OnPictureBoxDoubleClick;
+            picBox.MouseClick += OnThumbnailMouseClick;
+
+            var label = new Label
+            {
+                Text = $"{tempImage.Width}x{tempImage.Height}, {fileInfo.Length / 1024} KB",
+                Dock = DockStyle.Bottom,
+                Height = 30,
+                TextAlign = ContentAlignment.TopCenter,
+                AutoEllipsis = true
+            };
+
+            var container = new Panel
+            {
+                Width = 110,
+                Height = 95,
+                Margin = new Padding(5),
+                Tag = new ThumbnailMetadata
+                {
+                    Folder = fileInfo.DirectoryName,
+                    Width = tempImage.Width,
+                    Height = tempImage.Height,
+                    File = fileInfo,
+                }
+            };
+
+            container.Controls.Add(picBox);
+            container.Controls.Add(label);
+
+            this._pictureMap[picBox] = fileInfo;
+
+            return container;
+        }
+
+        private void OnNodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (sender is TreeView treeview && e.Button == MouseButtons.Right)
+            {
+                treeview.SelectedNode = e.Node;
+                _fileContextMenuStrip?.Show(treeview, e.Location);
+            }
+        }
+
+        private ToolStrip CreateTopToolbar()
+        {
+            var toolStrip = new ToolStrip { Dock = DockStyle.Top };
 
             // save button
             var saveButton = new ToolStripButton
@@ -825,8 +983,9 @@ namespace LocalWallpaperViewer
                 TextImageRelation = TextImageRelation.ImageBeforeText,
                 Image = GetIconFromFont('\uE74e') // save icon
             };
+            saveButton.Click += OnSaveButtonMenuItemClick;
 
-            // toggle View button
+            // toggle view button
             _toggleViewButton = new ToolStripButton
             {
                 Text = "Show file list",
@@ -835,9 +994,14 @@ namespace LocalWallpaperViewer
                 TextImageRelation = TextImageRelation.ImageBeforeText,
                 Image = GetIconFromFont('\uE74e')
             };
+            _toggleViewButton.Click += (s, e) =>
+            {
+                _viewMode = !_viewMode;
+                UpdateViewState();
+            };
 
             // toolstrip label
-            FilesToolStripLabel = new ToolStripLabel
+            _filesToolStripLabel = new ToolStripLabel
             {
                 Alignment = ToolStripItemAlignment.Right,
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
@@ -846,11 +1010,22 @@ namespace LocalWallpaperViewer
             };
 
             // toolstrip separator
-            var toolStripSeparator = new ToolStripSeparator
-            {
-                Alignment = ToolStripItemAlignment.Right
-            };
+            var toolStripSeparator = new ToolStripSeparator { Alignment = ToolStripItemAlignment.Right };
 
+            // settings button & drop-down items
+            var settingsButton = CreateSettingsDropdown();
+
+            toolStrip.Items.Add(saveButton);
+            toolStrip.Items.Add(_toggleViewButton);
+            toolStrip.Items.Add(settingsButton);
+            toolStrip.Items.Add(toolStripSeparator);
+            toolStrip.Items.Add(_filesToolStripLabel);
+
+            return toolStrip;
+        }
+
+        private ToolStripDropDownButton CreateSettingsDropdown()
+        {
             // settings button
             var settingsButton = new ToolStripDropDownButton
             {
@@ -863,34 +1038,34 @@ namespace LocalWallpaperViewer
                 Image = GetIconFromFont('\uE713') // cog icon
             };
 
-            // show Assets Folder menu item
+            // show assets folder menu item
             var SettingsMenuItemFolder1 = new ToolStripMenuItem("Show Assets Folder")
             {
                 CheckOnClick = true,
-                Checked = folderVisibilityStates[assetsUserDirectory],
-                Tag = assetsUserDirectory
+                Checked = folderVisibilityStates[_assetsUserDirectory],
+                Tag = _assetsUserDirectory
             };
             SettingsMenuItemFolder1.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
-            // show Lockscreen Folder menu item
+            // show lockscreen folder menu item
             var SettingsMenuItemFolder2 = new ToolStripMenuItem("Show Lockscreen Folder")
             {
                 CheckOnClick = true,
-                Checked = folderVisibilityStates[assetsLockScreenDirectory],
-                Tag = assetsLockScreenDirectory
+                Checked = folderVisibilityStates[_assetsLockScreenDirectory],
+                Tag = _assetsLockScreenDirectory
             };
             SettingsMenuItemFolder2.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
-            // show Spotlight Folder menu item
+            // show spotlight folder menu item
             var SettingsMenuItemFolder3 = new ToolStripMenuItem("Show Spotlight Folder")
             {
                 CheckOnClick = true,
-                Checked = folderVisibilityStates[assetsSpotLightDirectory],
-                Tag = assetsSpotLightDirectory
+                Checked = folderVisibilityStates[_assetsSpotLightDirectory],
+                Tag = _assetsSpotLightDirectory
             };
             SettingsMenuItemFolder3.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
-            // show Edit Folder menu item
+            // show edit folder menu item
             var SettingsMenuItemEditFolders = new ToolStripMenuItem("Edit Scan Folders")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
@@ -899,7 +1074,7 @@ namespace LocalWallpaperViewer
             };
             SettingsMenuItemEditFolders.Click += OnSettingsMenuItemEditFoldersClick;
 
-            // show Set Quick Save Folder menu item
+            // show set quick save folder menu item
             var SettingsMenuItemSetQuickSave = new ToolStripMenuItem("Set Quick Save folder")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
@@ -926,84 +1101,18 @@ namespace LocalWallpaperViewer
             settingsButton.DropDownItems.Add(new ToolStripSeparator());
             settingsButton.DropDownItems.Add(SettingsMenuItemAbout);
 
-            var toolStripMenuItem1 = new ToolStripMenuItem("Show All")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue740') // All images icon
-            };
+            return settingsButton;
+        }
 
-            var toolStripMenuItem2 = new ToolStripMenuItem("Portrait")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uee64') // Portrait icon
-            };
-
-            var toolStripMenuItem3 = new ToolStripMenuItem("Landscape")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue70a') // Landscape icon
-            };
-
-            var toolStripMenuItem4 = new ToolStripMenuItem("All Resolutions")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue8cc') // All Resolutions Icon
-            };
-
-            var toolStripMenuItem5 = new ToolStripMenuItem("1920x1080")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue70a') // Landscape icon
-            };
-
-            var toolStripMenuItem6 = new ToolStripMenuItem("1080x1920")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\uee64') // Portrait icon
-            };
-
-            var toolStripMenuItem7 = new ToolStripMenuItem("3840x2160")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
-                TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue70a') // Landscape icon
-            };
-
-            _toolStrip.Items.Add(saveButton);
-            _toolStrip.Items.Add(_toggleViewButton);
-            _toolStrip.Items.Add(settingsButton);
-            _toolStrip.Items.Add(toolStripSeparator);
-            _toolStrip.Items.Add(FilesToolStripLabel);
-
-            saveButton.Click += OnSaveButtonMenuItemClick;
-
-            _toggleViewButton.Click += (s, e) =>
-            {
-                ViewMode = !ViewMode;
-                UpdateViewState();
-            };
-
-            toolStripMenuItem1.Click += OnThumbnailFilterButtonClick;
-            toolStripMenuItem2.Click += OnThumbnailFilterButtonClick;
-            toolStripMenuItem3.Click += OnThumbnailFilterButtonClick;
-            toolStripMenuItem4.Click += OnResolutionFilterButtonClick;
-            toolStripMenuItem5.Click += OnResolutionFilterButtonClick;
-            toolStripMenuItem6.Click += OnResolutionFilterButtonClick;
-            toolStripMenuItem7.Click += OnResolutionFilterButtonClick;
-
+        private Panel CreateContentPanel()
+        {
             // file tree view image list
-            treeViewIcons = new ImageList { ImageSize = new Size(16, 16) };
-            treeViewIcons.Images.Add("folder", GetIconFromFont('\ue8b7'));
-            treeViewIcons.Images.Add("folderopen", GetIconFromFont('\ue838'));
-            treeViewIcons.Images.Add("file", GetIconFromFont('\ueb9f'));
+            _treeViewIcons = new ImageList { ImageSize = new Size(16, 16) };
+            _treeViewIcons.Images.Add("folder", GetIconFromFont('\ue8b7'));
+            _treeViewIcons.Images.Add("folderopen", GetIconFromFont('\ue838'));
+            _treeViewIcons.Images.Add("file", GetIconFromFont('\ueb9f'));
 
-            _contentPanel = new Panel
+            var contentPanel = new Panel
             {
                 Dock = DockStyle.Fill
             };
@@ -1014,64 +1123,14 @@ namespace LocalWallpaperViewer
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(230, 230, 230),
                 AutoSize = true,
-                ImageList = treeViewIcons,
+                ImageList = _treeViewIcons,
                 ImageIndex = 0,
                 SelectedImageIndex = 1,
                 Visible = false
             };
 
-            generalNode = new("Assets folder")
-            {
-                ImageIndex = 0,
-                SelectedImageIndex = 1
-            };
-            lockscreenNode = new("Lockscreen folder")
-            {
-                ImageIndex = 0,
-                SelectedImageIndex = 1
-            };
-            spotLightNode = new("SpotLight folder")
-            {
-                ImageIndex = 0,
-                SelectedImageIndex = 1
-            };
-
-            _fileTreeView.Nodes.Add(generalNode);
-            _fileTreeView.Nodes.Add(lockscreenNode);
-            _fileTreeView.Nodes.Add(spotLightNode);
-
-            _fileTreeView.ExpandAll();
             _fileTreeView.NodeMouseDoubleClick += OnFileTreeViewDoubleClick;
-            _fileTreeView.NodeMouseClick += (s, e) =>
-            {
-                if (e.Button == MouseButtons.Right)
-                {
-                    _fileTreeView.SelectedNode = e.Node;
-                    _fileContextMenuStrip?.Show(_fileTreeView, e.Location);
-                }
-            };
-
-            foreach (var fileInfo in _allAssetsCache)
-            {
-                TreeNode fileNode = new(fileInfo.Name)
-                {
-                    Tag = fileInfo,
-                    ImageIndex = 2,
-                    SelectedImageIndex = 2
-                };
-
-                if (fileInfo.FullName.StartsWith(assetsLockScreenDirectory, StringComparison.OrdinalIgnoreCase))
-                    lockscreenNode.Nodes.Add(fileNode);
-                else if (fileInfo.FullName.StartsWith(assetsSpotLightDirectory, StringComparison.OrdinalIgnoreCase))
-                    spotLightNode.Nodes.Add(fileNode);
-                else
-                    generalNode.Nodes.Add(fileNode);
-            }
-
-            if (_allAssetsCache.Length == 0)
-            {
-                MessageBox.Show("No files found");
-            }
+            _fileTreeView.NodeMouseClick += OnNodeMouseClick;
 
             // thumbnail panel
             this._thumbnailPanel = new FlowLayoutPanel
@@ -1086,143 +1145,147 @@ namespace LocalWallpaperViewer
                 Visible = true
             };
 
-            no_results_label = new Label
+            _no_results_label = new Label
             {
                 Text = "No files match selected filters",
                 Dock = DockStyle.Top,
                 Height = 30,
                 Visible = false,
             };
-            _thumbnailPanel.Controls.Add(no_results_label);
+            _thumbnailPanel.Controls.Add(_no_results_label);
 
-            foreach (var fileInfo in this._allAssetsCache)
-            {
-                try
-                {
-                    using var tempImage = Image.FromFile(fileInfo.FullName);
-                    var thumbnail = CreateThumbnail(tempImage, new Size(100, 60));
+            contentPanel.Controls.Add(_fileTreeView);
+            contentPanel.Controls.Add(_thumbnailPanel);
+            
+            return contentPanel;
+        }
 
-                    var picBox = new PictureBox
-                    {
-                        Image = thumbnail,
-                        Dock = DockStyle.Top,
-                        Height = 60,
-                        Width = 100,
-                        SizeMode = PictureBoxSizeMode.Zoom,
-                        Cursor = Cursors.Hand,
-                    };
-
-                    picBox.DoubleClick += OnPictureBoxDoubleClick;
-
-                    picBox.MouseClick += (s, e) =>
-                    {
-                        if (selectedThumbnail != null && selectedThumbnail.Parent is Panel oldContainer)
-                        {
-                            oldContainer.BorderStyle = BorderStyle.None;
-                        }
-                        selectedThumbnail = (PictureBox?)s; // cast sender to PictureBox
-                        if (selectedThumbnail != null && selectedThumbnail.Parent is Panel newContainer)
-                        {
-                            newContainer.BorderStyle = BorderStyle.FixedSingle;
-                        }
-                        if (e.Button == MouseButtons.Right)
-                        {
-                            // display the context menu at the cursor's location
-                            _fileContextMenuStrip?.Show(picBox, e.Location);
-                        }
-                    };
-
-                    var label = new Label
-                    {
-                        Text = $"{tempImage.Width}x{tempImage.Height}, {fileInfo.Length / 1024} KB",
-                        Dock = DockStyle.Bottom,
-                        Height = 30,
-                        TextAlign = ContentAlignment.TopCenter,
-                        AutoEllipsis = true
-                    };
-
-                    var container = new Panel
-                    {
-                        Width = 110,
-                        Height = 95,
-                        Margin = new Padding(5),
-                        Tag = new ThumbnailMetadata
-                        {
-                            Folder = fileInfo.DirectoryName,
-                            Width = tempImage.Width,
-                            Height = tempImage.Height,
-                            File = fileInfo,
-                        }
-                    };
-                    container.Controls.Add(picBox);
-                    container.Controls.Add(label);
-
-                    this._thumbnailPanel.Controls.Add(container);
-                    this.pictureMap[picBox] = fileInfo;
-                }
-                catch (OutOfMemoryException)
-                {
-                    // Not a valid image file or GDI+ could not create an image; skip.
-                }
-                catch (FileNotFoundException)
-                {
-                    // File disappeared between enumeration and access; skip.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // Insufficient permissions to read the file; skip.
-                }
-                catch (IOException)
-                {
-                    // General I/O error while accessing the file; skip.
-                }
-            }
-
-            _contentPanel.Controls.Add(_fileTreeView);
-            _contentPanel.Controls.Add(_thumbnailPanel);
-
-            // status strip
+        private StatusStrip CreateStatusStrip()
+        {
             var statusStrip = new StatusStrip { ShowItemToolTips = true };
-            statusStrip.Items.Add(statusStripLabel);
+            statusStrip.Items.Add(_statusStripLabel);
             statusStrip.Items.Add(new ToolStripStatusLabel("") { Spring = true, TextAlign = ContentAlignment.MiddleRight });
 
+            // orientation filters
+            var orientationAllMenuItem = new ToolStripMenuItem("Show All")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue740') // All images icon
+            };
+            orientationAllMenuItem.Click += OnThumbnailFilterButtonClick;
+
+            var orientationPortraitMenuItem = new ToolStripMenuItem("Portrait")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\uee64') // Portrait icon
+            };
+            orientationPortraitMenuItem.Click += OnThumbnailFilterButtonClick;
+
+            var orientationLandscapeMenuItem = new ToolStripMenuItem("Landscape")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue70a') // Landscape icon
+            };
+            orientationLandscapeMenuItem.Click += OnThumbnailFilterButtonClick;
+
+            // resolution filters
+            var resolutionAllMenuItem = new ToolStripMenuItem("All Resolutions")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue8cc') // All Resolutions Icon
+            };
+            resolutionAllMenuItem.Click += OnResolutionFilterButtonClick;
+
+            var resolutionFullHDMenuItem = new ToolStripMenuItem("1920x1080")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue70a') // Landscape icon
+            };
+            resolutionFullHDMenuItem.Click += OnResolutionFilterButtonClick;
+
+            var resolutionUltraHDMenuItem = new ToolStripMenuItem("3840x2160")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue70a') // Landscape icon
+            };
+            resolutionUltraHDMenuItem.Click += OnResolutionFilterButtonClick;
+
+            var resolutionvFullHDMenuItem = new ToolStripMenuItem("1080x1920")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\uee64') // Portrait icon
+            };
+            resolutionvFullHDMenuItem.Click += OnResolutionFilterButtonClick;
+
+            // filter label
             _statusStripFilterLabel = new ToolStripStatusLabel("Filter:");
             statusStrip.Items.Add(_statusStripFilterLabel);
 
+            // orientation filter button
             _statusStripThumbnailFilterButton = new ToolStripDropDownButton
             {
                 Text = "Show All",
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue740') // all images icon
+                Image = GetIconFromFont('\ue740')
             };
+            _statusStripThumbnailFilterButton.DropDownItems.Add(orientationAllMenuItem);
+            _statusStripThumbnailFilterButton.DropDownItems.Add(orientationPortraitMenuItem);
+            _statusStripThumbnailFilterButton.DropDownItems.Add(orientationLandscapeMenuItem);
+            statusStrip.Items.Add(_statusStripThumbnailFilterButton);
 
+            // resolution filter button
             _statusStripResolutionFilterButton = new ToolStripDropDownButton
             {
                 Text = "All Resolutions",
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ue740') // all resolution
+                Image = GetIconFromFont('\ue740')
             };
-
-            Controls.Add(_contentPanel);  // content container
-            Controls.Add(_toolStrip);     // top toolbar
-            Controls.Add(statusStrip);    // bottom statusbar
-
-            _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem1);
-            _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem2);
-            _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem3);
-            statusStrip.Items.Add(_statusStripThumbnailFilterButton);
-
-            _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem4);
-            _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem5);
-
-            _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem7);
-            _statusStripResolutionFilterButton.DropDownItems.Add(toolStripMenuItem6);
+            _statusStripResolutionFilterButton.DropDownItems.Add(resolutionAllMenuItem);
+            _statusStripResolutionFilterButton.DropDownItems.Add(resolutionFullHDMenuItem);
+            _statusStripResolutionFilterButton.DropDownItems.Add(resolutionUltraHDMenuItem);
+            _statusStripResolutionFilterButton.DropDownItems.Add(resolutionvFullHDMenuItem);
             statusStrip.Items.Add(_statusStripResolutionFilterButton);
+            
+            return statusStrip;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private void InitializeComponent()
+        {
+            this.components = new System.ComponentModel.Container();
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.Text = "Local Background Image Viewer";
+        }
+
+        private void SetupUI()
+        {
+            var toolbar = CreateTopToolbar();
+            var contentpanel = CreateContentPanel();
+            var statusbar = CreateStatusStrip();
+
+            Controls.Add(contentpanel);  // content container
+            Controls.Add(toolbar);     // top toolbar
+            Controls.Add(statusbar);    // bottom statusbar
 
             InitializeFileContextMenuStrip();
-            ApplyFilter();
         }
     }
 
@@ -1310,7 +1373,7 @@ namespace LocalWallpaperViewer
                 string propertyName = _settingProperties[i];
                 string? savedPath = settings[propertyName] as string;
 
-                // if the saved path is empty, use the default path
+                // if the saved path is empty, use default path
                 if (string.IsNullOrEmpty(savedPath))
                 {
                     _currentPaths[i] = _defaultPaths[i];
@@ -1328,10 +1391,10 @@ namespace LocalWallpaperViewer
         private void SaveSetting(int index, string path)
         {
             string propertyName = _settingProperties[index];
-            
+
             // set setting dynamically by name
             Settings.Default[propertyName] = path;
-            
+
             Settings.Default.Save();
         }
 
@@ -1364,7 +1427,7 @@ namespace LocalWallpaperViewer
                 var selectButton = new Button
                 {
                     Text = "Select folder",
-                    Tag = i, // use Tag to identify which setting this button belongs to
+                    Tag = i, // tag identifies which setting this button belongs to
                     AutoSize = true
                 };
                 selectButton.Click += BrowseButton_Click;
@@ -1385,7 +1448,8 @@ namespace LocalWallpaperViewer
             buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             // reset button
-            var resetButton = new Button { 
+            var resetButton = new Button
+            {
                 Text = "Reset to Defaults",
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -1402,14 +1466,14 @@ namespace LocalWallpaperViewer
         private void UpdateFolderStatusLabel(int index)
         {
             string statusText;
-            
+
             if (string.Equals(_currentPaths[index], _defaultPaths[index], StringComparison.OrdinalIgnoreCase))
             {
                 statusText = " (default)";
-                // set the setting value to empty when resetting to restore the default setting profile behavior
+                // set to empty when resetting to restore the default setting behavior
                 if (string.Equals(Settings.Default[_settingProperties[index]] as string, _defaultPaths[index], StringComparison.OrdinalIgnoreCase))
                 {
-                    // to reset the user set profile to default, clear the saved value
+                    // to reset the modified setting to default, clear the saved value
                     Settings.Default[_settingProperties[index]] = string.Empty;
                 }
             }
@@ -1417,7 +1481,7 @@ namespace LocalWallpaperViewer
             {
                 statusText = " (modified)";
             }
-            
+
             _folderLabels[index].Text = $"{_settingNames[index]}{statusText}";
         }
 
@@ -1450,14 +1514,14 @@ namespace LocalWallpaperViewer
                     // reset current internal path to the default
                     string defaultPath = _defaultPaths[i];
                     _currentPaths[i] = defaultPath;
-                    
-                    // force Settings.Default[propertyName] to return empty, allowing it to load the default next time
+
+                    // force Settings.Default[propertyName] to return empty to load defaults next time
                     SaveSetting(i, string.Empty);
-                    
+
                     _pathToolTip.SetToolTip(_folderLabels[i], defaultPath);
                     UpdateFolderStatusLabel(i);
                 }
-                
+
                 MessageBox.Show("Settings have been reset to default values and saved.", "Reset Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -1475,7 +1539,8 @@ namespace LocalWallpaperViewer
             InitializeLayout(appIcon);
         }
 
-        public void InitializeData(){
+        public void InitializeData()
+        {
             // get app name
             _appname = Assembly.GetEntryAssembly()
                 ?.GetCustomAttribute<AssemblyProductAttribute>()
@@ -1486,12 +1551,12 @@ namespace LocalWallpaperViewer
             // get buildtime
             try
             {
-            #if DEBUG
+#if DEBUG
                 var assembly = Assembly.GetEntryAssembly();
                 string? filePath = assembly?.Location;
-            #else
+#else
                 string? filePath = Environment.ProcessPath;
-            #endif
+#endif
 
                 if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
                 {
@@ -1541,12 +1606,12 @@ namespace LocalWallpaperViewer
             tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
             tableLayoutPanel.RowCount = 6;
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // Name
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F)); // Version
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Buildtime
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Link
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // License
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // OK Button
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // name
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F)); // version
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // buildtime
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // repo
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // license
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // ok button
 
             // app icon
             PictureBox iconPictureBox = new PictureBox
@@ -1635,14 +1700,18 @@ You should have received a copy of the GNU General Public License along with thi
             tableLayoutPanel.Controls.Add(licenseGroupBox, 0, 4);
             tableLayoutPanel.SetColumnSpan(licenseGroupBox, 2); // span both icon and info cols
 
-            Button okButton = new Button();
-            okButton.Text = "&OK";
-            okButton.DialogResult = DialogResult.OK;
-            okButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            Button okButton = new Button
+            {
+                Text = "&OK",
+                DialogResult = DialogResult.OK,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
 
-            FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
-            buttonPanel.FlowDirection = FlowDirection.RightToLeft;
-            buttonPanel.Dock = DockStyle.Fill;
+            FlowLayoutPanel buttonPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.RightToLeft,
+                Dock = DockStyle.Fill
+            };
             buttonPanel.Controls.Add(okButton);
 
             tableLayoutPanel.Controls.Add(buttonPanel, 0, 5);
