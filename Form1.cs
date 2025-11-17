@@ -4,49 +4,11 @@ using System.Drawing.Imaging;
 using System.Reflection;
 using System.Windows.Forms;
 
-internal static class StatusLabelExtensions
-{
-    private const string DefaultMessage = "Double click an image from the list to view";
-    private static System.Windows.Forms.Timer? notificationTimer;
-
-    public static void ShowTemporaryNotification(
-        this ToolStripStatusLabel label,
-        string notificationText,
-        double displayDurationSeconds = 3.0)
-    {
-        if (notificationTimer != null)
-        {
-            notificationTimer.Stop();
-            notificationTimer.Dispose();
-            notificationTimer = null;
-        }
-
-        label.Text = notificationText;
-
-        notificationTimer = new System.Windows.Forms.Timer
-        {
-            Interval = (int)(displayDurationSeconds * 1000)
-        };
-        notificationTimer.Tick += (sender, e) =>
-        {
-            if (notificationTimer != null)
-            {
-                notificationTimer.Stop();
-                notificationTimer.Dispose();
-                notificationTimer = null;
-            }
-
-            label.Text = DefaultMessage;
-        };
-
-        notificationTimer.Start();
-    }
-}
-
 namespace LocalWallpaperViewer
 {
-    internal sealed partial class Form1 : Form
+    internal sealed class Form1 : Form
     {
+        private System.ComponentModel.Container? components = null;
         private FileInfo[] _allAssetsCache = [];
         private Dictionary<PictureBox, FileInfo> pictureMap = [];
 
@@ -100,10 +62,19 @@ namespace LocalWallpaperViewer
             public FileInfo? File { get; set; }
         }
 
+        internal static class DefaultFolders
+        {
+            private static readonly string UserDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            internal static readonly string FolderA = Path.Combine(UserDirectory, @"AppData\Local\Packages\Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\LocalState\Assets");
+            internal static readonly string FolderB = Path.Combine(UserDirectory, @"AppData\Roaming\Microsoft\Windows\Themes");
+            internal static readonly string FolderC = Path.Combine(UserDirectory, @"AppData\Local\Packages\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\LocalCache\Microsoft\IrisService");
+        }
+
         public Form1(SplashForm? splash = null)
         {
             InitializeComponent();
-            splash?.UpdateStatus($"Loading...");
+            splash?.UpdateStatus($"Scanning Folders...");
             ViewMode = Settings.Default.ViewMode;
             OrientationFilter = (OrientationFilterStates)Settings.Default.OrientationFilter;
             ResolutionFilter = (ResolutionFilterStates)Settings.Default.ResolutionFilter;
@@ -570,184 +541,15 @@ namespace LocalWallpaperViewer
             }
         }
 
+        private void OnSettingsMenuItemEditFoldersClick(object? sender, EventArgs e)
+        {
+            using var settingsForm = new SettingsDialog();
+            settingsForm.ShowDialog(this);
+        }
+
         private void OnSettingsMenuItemAboutClick(object? sender, EventArgs e)
         {
-            // get app name
-            var appName = Assembly.GetEntryAssembly()
-                ?.GetCustomAttribute<AssemblyProductAttribute>()
-                ?.Product ?? "Local Wallpaper Viewer";
-
-            string architecture;
-            DateTime buildTime;
-
-            // get buildtime
-            try
-            {
-            #if DEBUG
-                var assembly = Assembly.GetEntryAssembly();
-                string? filePath = assembly?.Location;
-            #else
-                string? filePath = Environment.ProcessPath;
-            #endif
-
-                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
-                {
-                    buildTime = File.GetLastWriteTime(filePath);
-                }
-                else
-                {
-                    buildTime = DateTime.MinValue;
-                }
-            }
-            catch
-            {
-                buildTime = DateTime.MinValue;
-            }
-
-            string buildTimeString = buildTime == DateTime.MinValue
-                ? "Unknown"
-                : buildTime.ToString("yyyy-MM-dd HH:mm:ss");
-
-            // get architecture
-            if (Environment.Is64BitProcess)
-            {
-                architecture = "64-bit";
-            }
-            else
-            {
-                architecture = "32-bit";
-            }
-
-            Form aboutForm = new()
-            {
-                Text = $"About {appName}",
-                FormBorderStyle = FormBorderStyle.FixedDialog,
-                MaximizeBox = false,
-                MinimizeBox = false,
-                ShowInTaskbar = false,
-                StartPosition = FormStartPosition.CenterParent,
-                ClientSize = new Size(450, 335)
-            };
-
-            TableLayoutPanel tableLayoutPanel = new()
-            {
-                Dock = DockStyle.Fill,
-                Padding = new Padding(10),
-
-                ColumnCount = 2
-            };
-            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
-            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-            tableLayoutPanel.RowCount = 6;
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // Name
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F)); // Version
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Buildtime
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Link
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // License
-            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // OK Button
-
-            // app icon
-            PictureBox iconPictureBox = new PictureBox
-            {
-                Dock = DockStyle.Top,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = Icon?.ToBitmap()
-            };
-            tableLayoutPanel.Controls.Add(iconPictureBox, 0, 0);
-            tableLayoutPanel.SetRowSpan(iconPictureBox, 4); // span across the top 4 rows
-
-            // application name
-            Label AppNameLabel = new()
-            {
-                Text = appName,
-                Font = new Font(this.Font.FontFamily, 14, FontStyle.Bold),
-                Dock = DockStyle.Top,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            tableLayoutPanel.Controls.Add(AppNameLabel, 1, 0);
-
-            // version label
-            Label VersionLabel = new()
-            {
-                Text = $"Version {Application.ProductVersion[..Application.ProductVersion.LastIndexOf('+')]} ({architecture})",
-                Dock = DockStyle.Top,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            tableLayoutPanel.Controls.Add(VersionLabel, 1, 1);
-
-            // description label
-            Label BuildTimeLabel = new()
-            {
-                Text = $"Build Time: {buildTimeString}",
-                Dock = DockStyle.Top,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-            tableLayoutPanel.Controls.Add(BuildTimeLabel, 1, 2);
-
-            // github link label
-            LinkLabel GithubLinkLabel = new LinkLabel
-            {
-                Text = "Github Repo",
-                Tag = "https://github.com/",
-                Dock = DockStyle.Top
-            };
-            GithubLinkLabel.LinkClicked += (s, args) =>
-            {
-                var filename = GithubLinkLabel.Tag.ToString();
-                if (filename != null)
-                {
-                    Process.Start(new ProcessStartInfo(filename) { UseShellExecute = true });
-                }
-            };
-            tableLayoutPanel.Controls.Add(GithubLinkLabel, 1, 3);
-
-            // license
-            var licenseGroupBox = new GroupBox
-            {
-                Dock = DockStyle.Fill,
-                Text = "GNU General Public License",
-                BackColor = SystemColors.Control
-            };
-
-            var licenseText = new RichTextBox
-            {
-                DetectUrls = true,
-                Multiline = true,
-                ReadOnly = true,
-                BorderStyle = BorderStyle.None,
-                Dock = DockStyle.Fill,
-                Text = @"This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or at your option any later version.
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details. 
-You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>."
-            };
-            licenseText.LinkClicked += (s, args) =>
-            {
-                var url = args.LinkText;
-                if (!string.IsNullOrEmpty(url))
-                {
-                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-                }
-            };
-
-            licenseGroupBox.Controls.Add(licenseText);
-            tableLayoutPanel.Controls.Add(licenseGroupBox, 0, 4);
-            tableLayoutPanel.SetColumnSpan(licenseGroupBox, 2); // span both icon and info cols
-
-            Button okButton = new Button();
-            okButton.Text = "&OK";
-            okButton.DialogResult = DialogResult.OK;
-            okButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-
-            FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
-            buttonPanel.FlowDirection = FlowDirection.RightToLeft;
-            buttonPanel.Dock = DockStyle.Fill;
-            buttonPanel.Controls.Add(okButton);
-
-            tableLayoutPanel.Controls.Add(buttonPanel, 0, 5);
-            tableLayoutPanel.SetColumnSpan(buttonPanel, 2); // span both icon and info cols
-
-            aboutForm.Controls.Add(tableLayoutPanel);
+            using var aboutForm = new AboutDialog(this.Icon);
             aboutForm.ShowDialog(this);
         }
 
@@ -951,7 +753,7 @@ You should have received a copy of the GNU General Public License along with thi
         {
             _fileContextMenuStrip = new ContextMenuStrip();
             _fileContextMenuStrip.Items.Add("Show image", GetIconFromFont('\uE91b'), OnShowImageMenuItemClick);
-            _fileContextMenuStrip.Items.Add("Quick save", GetIconFromFont('\uE91b'), OnQuickSaveMenuItemClick);
+            _fileContextMenuStrip.Items.Add("Quick save", GetIconFromFont('\ue896'), OnQuickSaveMenuItemClick);
             _fileContextMenuStrip.Items.Add("Save to...", GetIconFromFont('\uE74e'), OnSaveButtonMenuItemClick);
             _fileContextMenuStrip.Items.Add(new ToolStripSeparator());
             _fileContextMenuStrip.Items.Add("Open image folder", GetIconFromFont('\uE838'), OnOpenFolderMenuItemClick);
@@ -989,6 +791,23 @@ You should have received a copy of the GNU General Public License along with thi
             return bitmap;
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private void InitializeComponent()
+        {
+            this.components = new System.ComponentModel.Container();
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.Text = "Local Background Image Viewer";
+        }
+
         private void SetupUI()
         {
             // top Toolbar
@@ -1020,7 +839,6 @@ You should have received a copy of the GNU General Public License along with thi
             // toolstrip label
             FilesToolStripLabel = new ToolStripLabel
             {
-                Text = "41 Pictures found (12 filtered)",
                 Alignment = ToolStripItemAlignment.Right,
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
@@ -1072,12 +890,21 @@ You should have received a copy of the GNU General Public License along with thi
             };
             SettingsMenuItemFolder3.CheckedChanged += OnFolderMenuItemCheckedChanged;
 
+            // show Edit Folder menu item
+            var SettingsMenuItemEditFolders = new ToolStripMenuItem("Edit Scan Folders")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                Image = GetIconFromFont('\ue90f') // Wrench icon
+            };
+            SettingsMenuItemEditFolders.Click += OnSettingsMenuItemEditFoldersClick;
+
             // show Set Quick Save Folder menu item
             var SettingsMenuItemSetQuickSave = new ToolStripMenuItem("Set Quick Save folder")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
                 TextImageRelation = TextImageRelation.ImageBeforeText,
-                Image = GetIconFromFont('\ued43') // Folder icon
+                Image = GetIconFromFont('\ue896') // Download icon
             };
             SettingsMenuItemSetQuickSave.Click += OnSettingsMenuItemSetQuickSaveClick;
 
@@ -1093,6 +920,7 @@ You should have received a copy of the GNU General Public License along with thi
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder1);
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder2);
             settingsButton.DropDownItems.Add(SettingsMenuItemFolder3);
+            settingsButton.DropDownItems.Add(SettingsMenuItemEditFolders);
             settingsButton.DropDownItems.Add(new ToolStripSeparator());
             settingsButton.DropDownItems.Add(SettingsMenuItemSetQuickSave);
             settingsButton.DropDownItems.Add(new ToolStripSeparator());
@@ -1377,9 +1205,9 @@ You should have received a copy of the GNU General Public License along with thi
                 Image = GetIconFromFont('\ue740') // all resolution
             };
 
-            Controls.Add(_contentPanel);  // The container with Fill
-            Controls.Add(_toolStrip);     // Top toolbar
-            Controls.Add(statusStrip);    // Bottom status
+            Controls.Add(_contentPanel);  // content container
+            Controls.Add(_toolStrip);     // top toolbar
+            Controls.Add(statusStrip);    // bottom statusbar
 
             _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem1);
             _statusStripThumbnailFilterButton.DropDownItems.Add(toolStripMenuItem2);
@@ -1432,6 +1260,434 @@ You should have received a copy of the GNU General Public License along with thi
         {
             label.Text = message.Replace("\\n", "\n");
             this.Refresh(); // force redraw
+        }
+    }
+
+    internal sealed class SettingsDialog : Form
+    {
+        private readonly string[] _settingNames = ["Assets folder:", "Lockscreen folder:", "SpotLight folder:"];
+        private readonly string[] _settingProperties = ["FolderAPath", "FolderBPath", "FolderCPath"];
+
+        private readonly Label[] _folderLabels = new Label[3];
+        private readonly Button[] _browseButtons = new Button[3];
+        private readonly ToolTip _pathToolTip = new();
+
+        private string[] _currentPaths = new string[3];
+        private readonly string[] _defaultPaths = new string[3];
+
+        public SettingsDialog()
+        {
+            CalculateDefaultPaths();
+            InitializeForm();
+            InitializeComponents();
+            LoadSettings();
+        }
+
+        private void CalculateDefaultPaths()
+        {
+            _defaultPaths[0] = Form1.DefaultFolders.FolderA;
+            _defaultPaths[1] = Form1.DefaultFolders.FolderB;
+            _defaultPaths[2] = Form1.DefaultFolders.FolderC;
+        }
+
+        private void InitializeForm()
+        {
+            this.Text = "Edit Folders";
+            this.ClientSize = new Size(300, 200);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
+        }
+
+        private void LoadSettings()
+        {
+            var settings = Settings.Default;
+
+            for (int i = 0; i < 3; i++)
+            {
+                string propertyName = _settingProperties[i];
+                string? savedPath = settings[propertyName] as string;
+
+                // if the saved path is empty, use the default path
+                if (string.IsNullOrEmpty(savedPath))
+                {
+                    _currentPaths[i] = _defaultPaths[i];
+                }
+                else
+                {
+                    _currentPaths[i] = savedPath;
+                }
+
+                _pathToolTip.SetToolTip(_folderLabels[i], _currentPaths[i]);
+                UpdateFolderStatusLabel(i);
+            }
+        }
+
+        private void SaveSetting(int index, string path)
+        {
+            string propertyName = _settingProperties[index];
+            
+            // set setting dynamically by name
+            Settings.Default[propertyName] = path;
+            
+            Settings.Default.Save();
+        }
+
+        private void InitializeComponents()
+        {
+            var folderPanel = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                RowCount = 3,
+                Dock = DockStyle.Top,
+                Padding = new Padding(10),
+                AutoSize = true,
+            };
+
+            folderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            folderPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            // create the three folder setting rows
+            for (int i = 0; i < 3; i++)
+            {
+                var pathLabel = new Label
+                {
+                    Text = _settingNames[i],
+                    Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                    AutoSize = false,
+                };
+                _folderLabels[i] = pathLabel; // store the reference
+                folderPanel.Controls.Add(pathLabel, 0, i); // place in column
+
+                var selectButton = new Button
+                {
+                    Text = "Select folder",
+                    Tag = i, // use Tag to identify which setting this button belongs to
+                    AutoSize = true
+                };
+                selectButton.Click += BrowseButton_Click;
+                _browseButtons[i] = selectButton; // store the reference
+                folderPanel.Controls.Add(selectButton, 1, i);
+            }
+
+            this.Controls.Add(folderPanel);
+
+            var buttonPanel = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                Dock = DockStyle.Bottom,
+                Padding = new Padding(10, 5, 10, 10),
+                AutoSize = true,
+            };
+            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            // reset button
+            var resetButton = new Button { 
+                Text = "Reset to Defaults",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Anchor = AnchorStyles.Right
+            };
+
+            resetButton.Click += ResetButton_Click;
+            buttonPanel.Controls.Add(resetButton, 1, 0);
+
+            this.Controls.Add(buttonPanel);
+            this.ClientSize = new Size(300, folderPanel.Height + buttonPanel.Height);
+        }
+
+        private void UpdateFolderStatusLabel(int index)
+        {
+            string statusText;
+            
+            if (string.Equals(_currentPaths[index], _defaultPaths[index], StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = " (default)";
+                // set the setting value to empty when resetting to restore the default setting profile behavior
+                if (string.Equals(Settings.Default[_settingProperties[index]] as string, _defaultPaths[index], StringComparison.OrdinalIgnoreCase))
+                {
+                    // to reset the user set profile to default, clear the saved value
+                    Settings.Default[_settingProperties[index]] = string.Empty;
+                }
+            }
+            else
+            {
+                statusText = " (modified)";
+            }
+            
+            _folderLabels[index].Text = $"{_settingNames[index]}{statusText}";
+        }
+
+        private void BrowseButton_Click(object? sender, EventArgs e)
+        {
+            if (sender is Button button && button.Tag is int index)
+            {
+                using var dialog = new FolderBrowserDialog();
+                dialog.InitialDirectory = _currentPaths[index];
+
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    string selectedPath = dialog.SelectedPath;
+
+                    _currentPaths[index] = selectedPath;
+                    SaveSetting(index, selectedPath);
+
+                    _pathToolTip.SetToolTip(_folderLabels[index], selectedPath);
+                    UpdateFolderStatusLabel(index);
+                }
+            }
+        }
+
+        private void ResetButton_Click(object? sender, EventArgs e)
+        {
+            if (MessageBox.Show("Are you sure you want to reset all folder paths to their default values?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    // reset current internal path to the default
+                    string defaultPath = _defaultPaths[i];
+                    _currentPaths[i] = defaultPath;
+                    
+                    // force Settings.Default[propertyName] to return empty, allowing it to load the default next time
+                    SaveSetting(i, string.Empty);
+                    
+                    _pathToolTip.SetToolTip(_folderLabels[i], defaultPath);
+                    UpdateFolderStatusLabel(i);
+                }
+                
+                MessageBox.Show("Settings have been reset to default values and saved.", "Reset Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+    }
+
+    internal sealed class AboutDialog : Form
+    {
+        private string _appname = string.Empty;
+        private string _architecture = string.Empty;
+        private string _buildtime = string.Empty;
+
+        public AboutDialog(Icon? appIcon = null)
+        {
+            InitializeData();
+            InitializeLayout(appIcon);
+        }
+
+        public void InitializeData(){
+            // get app name
+            _appname = Assembly.GetEntryAssembly()
+                ?.GetCustomAttribute<AssemblyProductAttribute>()
+                ?.Product ?? "Local Wallpaper Viewer";
+
+            DateTime buildTime;
+
+            // get buildtime
+            try
+            {
+            #if DEBUG
+                var assembly = Assembly.GetEntryAssembly();
+                string? filePath = assembly?.Location;
+            #else
+                string? filePath = Environment.ProcessPath;
+            #endif
+
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    buildTime = File.GetLastWriteTime(filePath);
+                }
+                else
+                {
+                    buildTime = DateTime.MinValue;
+                }
+            }
+            catch
+            {
+                buildTime = DateTime.MinValue;
+            }
+
+            _buildtime = buildTime == DateTime.MinValue ? "Unknown" : buildTime.ToString("yyyy-MM-dd HH:mm:ss");
+
+            // get architecture
+            if (Environment.Is64BitProcess)
+            {
+                _architecture = "64-bit";
+            }
+            else
+            {
+                _architecture = "32-bit";
+            }
+        }
+
+        public void InitializeLayout(Icon? appIcon = null)
+        {
+            this.Text = $"About {_appname}";
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.ShowInTaskbar = false;
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.ClientSize = new Size(450, 335);
+
+            TableLayoutPanel tableLayoutPanel = new()
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10),
+
+                ColumnCount = 2
+            };
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            tableLayoutPanel.RowCount = 6;
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // Name
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F)); // Version
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Buildtime
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25F)); // Link
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // License
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // OK Button
+
+            // app icon
+            PictureBox iconPictureBox = new PictureBox
+            {
+                Dock = DockStyle.Top,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Image = appIcon?.ToBitmap()
+            };
+            tableLayoutPanel.Controls.Add(iconPictureBox, 0, 0);
+            tableLayoutPanel.SetRowSpan(iconPictureBox, 4); // span across the top 4 rows
+
+            // application name
+            Label AppNameLabel = new()
+            {
+                Text = _appname,
+                Font = new Font(this.Font.FontFamily, 14, FontStyle.Bold),
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            tableLayoutPanel.Controls.Add(AppNameLabel, 1, 0);
+
+            // version label
+            Label VersionLabel = new()
+            {
+                Text = $"Version {Application.ProductVersion[..Application.ProductVersion.LastIndexOf('+')]} ({_architecture})",
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            tableLayoutPanel.Controls.Add(VersionLabel, 1, 1);
+
+            // description label
+            Label BuildTimeLabel = new()
+            {
+                Text = $"Build Time: {_buildtime}",
+                Dock = DockStyle.Top,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            tableLayoutPanel.Controls.Add(BuildTimeLabel, 1, 2);
+
+            // github link label
+            LinkLabel GithubLinkLabel = new LinkLabel
+            {
+                Text = "Github Repo",
+                Tag = "https://github.com/",
+                Dock = DockStyle.Top
+            };
+            GithubLinkLabel.LinkClicked += (s, args) =>
+            {
+                var filename = GithubLinkLabel.Tag.ToString();
+                if (filename != null)
+                {
+                    Process.Start(new ProcessStartInfo(filename) { UseShellExecute = true });
+                }
+            };
+            tableLayoutPanel.Controls.Add(GithubLinkLabel, 1, 3);
+
+            // license
+            var licenseGroupBox = new GroupBox
+            {
+                Dock = DockStyle.Fill,
+                Text = "GNU General Public License",
+                BackColor = SystemColors.Control
+            };
+
+            var licenseText = new RichTextBox
+            {
+                DetectUrls = true,
+                Multiline = true,
+                ReadOnly = true,
+                BorderStyle = BorderStyle.None,
+                Dock = DockStyle.Fill,
+                Text = @"This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or at your option any later version.
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details. 
+You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>."
+            };
+            licenseText.LinkClicked += (s, args) =>
+            {
+                var url = args.LinkText;
+                if (!string.IsNullOrEmpty(url))
+                {
+                    Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                }
+            };
+
+            licenseGroupBox.Controls.Add(licenseText);
+            tableLayoutPanel.Controls.Add(licenseGroupBox, 0, 4);
+            tableLayoutPanel.SetColumnSpan(licenseGroupBox, 2); // span both icon and info cols
+
+            Button okButton = new Button();
+            okButton.Text = "&OK";
+            okButton.DialogResult = DialogResult.OK;
+            okButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+
+            FlowLayoutPanel buttonPanel = new FlowLayoutPanel();
+            buttonPanel.FlowDirection = FlowDirection.RightToLeft;
+            buttonPanel.Dock = DockStyle.Fill;
+            buttonPanel.Controls.Add(okButton);
+
+            tableLayoutPanel.Controls.Add(buttonPanel, 0, 5);
+            tableLayoutPanel.SetColumnSpan(buttonPanel, 2); // span both icon and info cols
+
+            this.Controls.Add(tableLayoutPanel);
+        }
+    }
+
+    internal static class StatusLabelExtensions
+    {
+        private const string DefaultMessage = "Double click an image from the list to view";
+        private static System.Windows.Forms.Timer? notificationTimer;
+
+        public static void ShowTemporaryNotification(
+            this ToolStripStatusLabel label,
+            string notificationText,
+            double displayDurationSeconds = 3.0)
+        {
+            if (notificationTimer != null)
+            {
+                notificationTimer.Stop();
+                notificationTimer.Dispose();
+                notificationTimer = null;
+            }
+
+            label.Text = notificationText;
+
+            notificationTimer = new System.Windows.Forms.Timer
+            {
+                Interval = (int)(displayDurationSeconds * 1000)
+            };
+            notificationTimer.Tick += (sender, e) =>
+            {
+                if (notificationTimer != null)
+                {
+                    notificationTimer.Stop();
+                    notificationTimer.Dispose();
+                    notificationTimer = null;
+                }
+
+                label.Text = DefaultMessage;
+            };
+
+            notificationTimer.Start();
         }
     }
 }
