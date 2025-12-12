@@ -755,7 +755,7 @@ namespace LocalWallpaperViewer
         private void InitializeFileContextMenuStrip()
         {
             _fileContextMenuStrip = new ContextMenuStrip();
-            _fileContextMenuStrip.Items.Add("Show image", GetIconFromFont('\uE91b'), OnShowImageMenuItemClick);
+            _fileContextMenuStrip.Items.Add("Open in preview", GetIconFromFont('\uE91b'), OnShowImageMenuItemClick);
             _fileContextMenuStrip.Items.Add("Quick save", GetIconFromFont('\ue896'), OnQuickSaveMenuItemClick);
             _fileContextMenuStrip.Items.Add("Save to...", GetIconFromFont('\uE74e'), OnSaveButtonMenuItemClick);
             _fileContextMenuStrip.Items.Add(new ToolStripSeparator());
@@ -1528,6 +1528,22 @@ namespace LocalWallpaperViewer
             InitializeLayout(appIcon);
         }
 
+        private static Bitmap? GetIconBitmapOfSize(Icon? icon, int size)
+        {
+            if (icon == null)
+                return null;
+
+            try
+            {
+                using Icon sized = new Icon(icon, new Size(size, size));
+                return sized.ToBitmap();
+            }
+            catch
+            {
+                return icon.ToBitmap();
+            }
+        }
+
         public void InitializeData()
         {
             // get app name
@@ -1588,7 +1604,6 @@ namespace LocalWallpaperViewer
             {
                 Dock = DockStyle.Fill,
                 Padding = new Padding(10),
-
                 ColumnCount = 2
             };
             tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
@@ -1602,15 +1617,26 @@ namespace LocalWallpaperViewer
             tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // license
             tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // ok button
 
-            // app icon
-            PictureBox iconPictureBox = new PictureBox
+            // app icon picture
+            Control iconControl = new Control
             {
-                Dock = DockStyle.Top,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Image = appIcon?.ToBitmap()
+                Width = 64,
+                Height = 64,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
             };
-            tableLayoutPanel.Controls.Add(iconPictureBox, 0, 0);
-            tableLayoutPanel.SetRowSpan(iconPictureBox, 4); // span across the top 4 rows
+
+            iconControl.Paint += (s, e) =>
+            {
+                if (appIcon != null)
+                {
+                    using var sized = new Icon(appIcon, new Size(64, 64));
+                    e.Graphics.DrawIcon(sized, 0, 0);
+                }
+            };
+
+            iconControl.Margin = new Padding(20, 14, 0, 0);
+            tableLayoutPanel.Controls.Add(iconControl, 0, 0);
+            tableLayoutPanel.SetRowSpan(iconControl, 4);
 
             // application name
             Label AppNameLabel = new()
@@ -1644,7 +1670,7 @@ namespace LocalWallpaperViewer
             LinkLabel GithubLinkLabel = new LinkLabel
             {
                 Text = "Github Repo",
-                Tag = "https://github.com/",
+                Tag = "https://github.com/narfel/LocalWallpaperViewer/",
                 Dock = DockStyle.Top
             };
             GithubLinkLabel.LinkClicked += (s, args) =>
